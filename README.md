@@ -1,4 +1,8 @@
 # MLOps MiBici Equipo 21
+- A0173318 Berenice Chapuli Xochimitl
+- A01702737 Walter Gonzalo Fernandez Deza
+- A01374964 Jesús Zabdiel Sánchez Chávez
+- A01639802 Alejandro Gil Ruiz
 
 <div align="left">
   <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />&nbsp;&nbsp;

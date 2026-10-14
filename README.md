@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/MLflow-0194E2?style=flat-square&logo=mlflow&logoColor=white" alt="MLflow" />
 </div>
 
-Proyecto de MLOps para el sistema de bicicletas compartidas MiBici - Equipo 21
+MLOps project for the MiBici bike-sharing system
 
 ## Project Organization
 

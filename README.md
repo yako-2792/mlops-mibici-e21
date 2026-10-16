@@ -132,6 +132,32 @@ This project uses `uv` for Python package and environment management.
   uv run main.py
   ```
 
+### 4. Makefile
+
+`make help` lists every command. Ingestion writes a local Parquet file. `HF` controls the Hugging Face upload and defaults to `false`.
+
+```bash
+make help
+make requirements
+make create_environment
+make clean
+make lint
+make format
+make test
+```
+
+`make lint` checks formatting and style. `make format` applies the Ruff fixes. `make test` runs pytest.
+
+Station and trip ingestion need `HF=true` or `HF=false`. Any other value stops the command before it downloads or uploads.
+
+```bash
+make ingest-stations HF=false
+make ingest-trips YEAR=2014 HF=true
+make ingest-trips-range START=2014 END=2016 HF=true
+```
+
+`YEAR` is required for one year. `START` and `END` are required for a range, and both ends are included. `make data` runs `mibici_e21/dataset.py`.
+
 ## Git and GitHub Workflow (GitHub Flow)
 
 ### Collaboration Rules

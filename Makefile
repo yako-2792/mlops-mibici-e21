@@ -5,83 +5,58 @@
 PROJECT_NAME = mlops-mibici-e21
 PYTHON_VERSION = 3.11
 PYTHON_INTERPRETER = python
+HF ?= false
+PUSH_TO_HF = $(if $(filter true,$(HF)),True,False)
 
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
 
+.PHONY: help requirements clean lint format test create_environment data check-hf ingest-stations ingest-trips ingest-trips-range
 
-## Install Python dependencies
-.PHONY: requirements
-requirements:
+help: ## Show this help message
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
+
+requirements: ## Install dependencies with uv
 	uv sync
-	
 
-
-
-## Delete all compiled Python files
-.PHONY: clean
-clean:
+clean: ## Delete compiled Python files
 	find . -type f -name "*.py[co]" -delete
 	find . -type d -name "__pycache__" -delete
 
+lint: ## Check formatting and style with Ruff
+	uv run ruff format --check
+	uv run ruff check
 
-## Lint using ruff (use `make format` to do formatting)
-.PHONY: lint
-lint:
-	ruff format --check
-	ruff check
+format: ## Format the code with Ruff
+	uv run ruff check --fix
+	uv run ruff format
 
-## Format source code with ruff
-.PHONY: format
-format:
-	ruff check --fix
-	ruff format
+test: ## Run the unit tests with pytest
+	uv run pytest tests/ -v
 
-
-
-## Run tests
-.PHONY: test
-test:
-	python -m pytest tests
-
-
-## Set up Python interpreter environment
-.PHONY: create_environment
-create_environment:
+create_environment: ## Create the virtual environment with uv
 	uv venv --python $(PYTHON_VERSION)
 	@echo ">>> New uv virtual environment created. Activate with:"
 	@echo ">>> Windows: .\\\\.venv\\\\Scripts\\\\activate"
 	@echo ">>> Unix/macOS: source ./.venv/bin/activate"
-	
 
+data: requirements ## Run the dataset script
+	uv run python mibici_e21/dataset.py
 
+check-hf:
+	@case "$(HF)" in \
+		true|false) ;; \
+		*) echo "Error: HF must be true or false. Example: make ingest-stations HF=true"; exit 1 ;; \
+	esac
 
-#################################################################################
-# PROJECT RULES                                                                 #
-#################################################################################
+ingest-stations: check-hf ## Ingest the station catalog. Usage: make ingest-stations HF=true
+	uv run python -c "from mibici_e21.ingestion.pipeline import IngestionPipeline; IngestionPipeline().ingest_stations(push_to_hf=$(PUSH_TO_HF))"
 
+ingest-trips: check-hf ## Ingest one year of trips. Usage: make ingest-trips YEAR=2024 HF=true
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make ingest-trips YEAR=2024 HF=true"; exit 1; fi
+	uv run python -c "from mibici_e21.ingestion.pipeline import IngestionPipeline; IngestionPipeline().ingest_trips_year($(YEAR), push_to_hf=$(PUSH_TO_HF))"
 
-## Make dataset
-.PHONY: data
-data: requirements
-	$(PYTHON_INTERPRETER) mibici_e21/dataset.py
-
-
-#################################################################################
-# Self Documenting Commands                                                     #
-#################################################################################
-
-.DEFAULT_GOAL := help
-
-define PRINT_HELP_PYSCRIPT
-import re, sys; \
-lines = '\n'.join([line for line in sys.stdin]); \
-matches = re.findall(r'\n## (.*)\n[\s\S]+?\n([a-zA-Z_-]+):', lines); \
-print('Available rules:\n'); \
-print('\n'.join(['{:25}{}'.format(*reversed(match)) for match in matches]))
-endef
-export PRINT_HELP_PYSCRIPT
-
-help:
-	@$(PYTHON_INTERPRETER) -c "${PRINT_HELP_PYSCRIPT}" < $(MAKEFILE_LIST)
+ingest-trips-range: check-hf ## Ingest a range of trip years. Usage: make ingest-trips-range START=2015 END=2024 HF=true
+	@if [ -z "$(START)" ] || [ -z "$(END)" ]; then echo "Error: START and END are required. Example: make ingest-trips-range START=2015 END=2024 HF=false"; exit 1; fi
+	uv run python -c "from mibici_e21.ingestion.pipeline import IngestionPipeline; IngestionPipeline().ingest_trips_range($(START), $(END), push_to_hf=$(PUSH_TO_HF))"

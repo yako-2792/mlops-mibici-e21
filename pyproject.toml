@@ -16,10 +16,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "huggingface-hub>=2.2.0",
     "loguru",
     "pip",
+    "pyarrow>=26.0.0",
     "pytest",
     "python-dotenv",
+    "requests>=2.34.2",
     "ruff",
     "tqdm",
     "typer",

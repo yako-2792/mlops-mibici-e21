@@ -18,6 +18,7 @@ classifiers = [
 dependencies = [
     "huggingface-hub>=2.2.0",
     "loguru",
+    "pandas>=3.0.6",
     "pip",
     "pyarrow>=26.0.0",
     "pytest",

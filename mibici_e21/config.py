@@ -35,6 +35,7 @@ class DataLakeSettings:
     - `TEMP_DIR`: local directory for temporary downloads.
     - `RAW_DIR`: local directory for raw files.
     - `HF_TOKEN`: Hugging Face token, read from the `HF_TOKEN` environment variable.
+    - `PROCESSED_DIR`: data lake output for the yearly Parquet files. Points at `data/raw`.
     """
 
     MIBICI_BASE_URL: str = "https://www.mibici.net/site/assets/files/"
@@ -42,7 +43,24 @@ class DataLakeSettings:
     TEMP_DIR: Path = TEMP_DATA_DIR
     RAW_DIR: Path = RAW_DATA_DIR
     HF_TOKEN: str | None = os.getenv("HF_TOKEN")
-    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+    PROCESSED_DIR: Path = RAW_DATA_DIR
 
 
 DATA_LAKE_SETTINGS = DataLakeSettings()
+
+
+# Feature store config
+class FeatureStoreSettings:
+    """Settings for the feature store.
+
+    - `MAX_TRIP_DURATION_MINUTES`: maximum trip duration in minutes. Defaults to 8 hours.
+    - `MIN_TRIP_DURATION_MINUTES`: minimum trip duration in minutes. Defaults to 0 minutes.
+    - `PROCESSED_DIR`: directory for gold feature Parquet files. Points at `data/processed`.
+    """
+
+    MAX_TRIP_DURATION_MINUTES: float = 480.0
+    MIN_TRIP_DURATION_MINUTES: float = 0.0
+    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+
+
+FEATURE_STORE_SETTINGS = FeatureStoreSettings()

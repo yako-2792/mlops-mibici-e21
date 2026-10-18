@@ -40,10 +40,11 @@ MiBici publishes one CSV per month. The file id in each URL comes from the catal
 | Layer | Path | What happens |
 | --- | --- | --- |
 | Bronze | `data/temp/` | `extractor.py` downloads the trip and station CSVs. Months missing from the catalog are skipped. Trip files are saved as `datos_abiertos_YYYY_MM.csv`. |
-| Silver | `data/processed/` | `transformer.py` drops the original header, names columns by position, and casts them with PyArrow. Null tokens such as `NA` stay null. Timestamps are accepted as ISO-8601 or `%d/%m/%Y %H:%M`. `publisher.py` writes `mibici-trips-{year}.parquet` and `mibici-stations.parquet`. |
-| Share | Hugging Face | `pipeline.py` uploads those Parquet files when `HF=true`. The dataset is `yako2792/mibici-dataset`. Hugging Face versions the data: each upload or deletion is a commit on that dataset. |
+| Silver | `data/raw/` | `transformer.py` drops the original header, names columns by position, and casts them with PyArrow. Null tokens such as `NA` stay null. Timestamps are accepted as ISO-8601 or `%d/%m/%Y %H:%M`. `publisher.py` writes `mibici-trips-{year}.parquet` and `mibici-stations.parquet`. That folder is `DATA_LAKE_SETTINGS.PROCESSED_DIR`. |
+| Gold | `data/processed/` | `features.py` reads the yearly trip Parquet from `data/raw/` and writes `features_{year}.parquet` and `demand_aggregated_{year}.parquet`. |
+| Share | Hugging Face | `pipeline.py` uploads the silver Parquet files when `HF=true`. The dataset is `yako2792/mibici-dataset`. Hugging Face versions the data: each upload or deletion is a commit on that dataset. |
 
-`make download-data` copies the published Parquet files back into `data/processed/` without running the scraper. The version history of those files lives in the Hugging Face dataset commits.
+`make download-data` copies the published Parquet files back into `data/raw/` without running the scraper. The version history of those files lives in the Hugging Face dataset commits.
 
 ---
 
@@ -92,10 +93,24 @@ make ingest-trips-range START=2015 END=2024 HF=true
 
 | Command | What it does |
 | --- | --- |
-| `make download-data` | Download the dataset `*.parquet` files from Hugging Face into `data/processed/`. |
+| `make download-data` | Download the dataset `*.parquet` files from Hugging Face into `data/raw/`. |
 
 ```bash
 make download-data
+```
+
+### Gold features
+
+These commands read `mibici-trips-{year}.parquet` from `data/raw/` and write `features_{year}.parquet` and `demand_aggregated_{year}.parquet` into `data/processed/`. `YEAR` is required for one year. `START` and `END` are required for a range, and both ends are included. A missing year stops the command.
+
+| Command | What it does |
+| --- | --- |
+| `make materialize-yearly-features YEAR=2023` | Build trip features and station demand for one year. |
+| `make materialize-features-range START=2015 END=2024` | Build trip features and station demand for every year in the range. |
+
+```bash
+make materialize-yearly-features YEAR=2023
+make materialize-features-range START=2015 END=2024
 ```
 
 ### Maintenance
@@ -104,14 +119,20 @@ make download-data
 
 | Command | What it does |
 | --- | --- |
-| `make clean-temp` | Remove the contents of `data/temp/` and keep the directory. |
-| `make clean-processed` | Remove `*.parquet` files in `data/processed/`. |
-| `make clean-all` | Run `clean-temp` and `clean-processed`. |
+| `make clean-temp` | Delete the contents of `data/temp/` and keep the directory. |
+| `make clean-raw` | Delete the contents of `data/raw/` and keep the directory. |
+| `make clean-interim` | Delete the contents of `data/interim/` and keep the directory. |
+| `make clean-processed` | Delete the contents of `data/processed/` and keep the directory. |
+| `make clean-external` | Delete the contents of `data/external/` and keep the directory. |
+| `make clean-all` | Run every data-directory clean above. |
 | `make clean` | Delete `__pycache__` and `*.pyc` files. |
 
 ```bash
 make clean-temp
+make clean-raw
+make clean-interim
 make clean-processed
+make clean-external
 make clean-all
 ```
 
@@ -146,8 +167,8 @@ make test
 ├── pyproject.toml           <- package metadata and Ruff configuration
 ├── data
 │   ├── temp                 <- Bronze: CSVs downloaded by the extractor
-│   ├── processed            <- Silver: Parquet files for modeling
-│   ├── raw
+│   ├── raw                  <- Silver: data lake Parquet files
+│   ├── processed            <- Gold: trip features and station demand
 │   ├── interim
 │   └── external
 └── mibici_e21

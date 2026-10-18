@@ -60,3 +60,15 @@ ingest-trips: check-hf ## Ingest one year of trips. Usage: make ingest-trips YEA
 ingest-trips-range: check-hf ## Ingest a range of trip years. Usage: make ingest-trips-range START=2015 END=2024 HF=true
 	@if [ -z "$(START)" ] || [ -z "$(END)" ]; then echo "Error: START and END are required. Example: make ingest-trips-range START=2015 END=2024 HF=false"; exit 1; fi
 	uv run python -c "from mibici_e21.ingestion.pipeline import IngestionPipeline; IngestionPipeline().ingest_trips_range($(START), $(END), push_to_hf=$(PUSH_TO_HF))"
+
+download-data: ## Download the Processed (.parquet) directly from Hugging Face Hub
+	uv run python -c "from mibici_e21.dataset import download_dataset; download_dataset()"
+
+clean-temp: ## Clean temporary CSV files in data/temp/
+	uv run python -c "from mibici_e21.dataset import clean_temp_files; clean_temp_files()"
+
+clean-processed: ## Clean all processed Parquet files in data/processed/
+	uv run python -c "from mibici_e21.dataset import clean_processed_files; clean_processed_files()"
+
+clean-all: ## Clean both temporary and processed files
+	uv run python -c "from mibici_e21.dataset import clean_all_data_files; clean_all_data_files()"

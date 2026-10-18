@@ -7,15 +7,17 @@ PYTHON_VERSION = 3.11
 PYTHON_INTERPRETER = python
 HF ?= false
 PUSH_TO_HF = $(if $(filter true,$(HF)),True,False)
+SAVE_CSV ?= false
+SAVE_CSV_BOOL = $(if $(filter true,$(SAVE_CSV)),True,False)
 
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test create_environment data check-hf ingest-stations ingest-trips ingest-trips-range
+.PHONY: help requirements clean lint format test create_environment data check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range train predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
 
 requirements: ## Install dependencies with uv
 	uv sync
@@ -64,11 +66,40 @@ ingest-trips-range: check-hf ## Ingest a range of trip years. Usage: make ingest
 download-data: ## Download the Processed (.parquet) directly from Hugging Face Hub
 	uv run python -c "from mibici_e21.dataset import download_dataset; download_dataset()"
 
-clean-temp: ## Clean temporary CSV files in data/temp/
+clean-temp: ## Delete the contents of data/temp/
 	uv run python -c "from mibici_e21.dataset import clean_temp_files; clean_temp_files()"
 
-clean-processed: ## Clean all processed Parquet files in data/processed/
+clean-raw: ## Delete the contents of data/raw/
+	uv run python -c "from mibici_e21.dataset import clean_raw_files; clean_raw_files()"
+
+clean-interim: ## Delete the contents of data/interim/
+	uv run python -c "from mibici_e21.dataset import clean_interim_files; clean_interim_files()"
+
+clean-processed: ## Delete the contents of data/processed/
 	uv run python -c "from mibici_e21.dataset import clean_processed_files; clean_processed_files()"
 
-clean-all: ## Clean both temporary and processed files
+clean-external: ## Delete the contents of data/external/
+	uv run python -c "from mibici_e21.dataset import clean_external_files; clean_external_files()"
+
+clean-all: ## Delete the contents of every directory under data/
 	uv run python -c "from mibici_e21.dataset import clean_all_data_files; clean_all_data_files()"
+
+materialize-yearly-features: ## Materialize one year of gold features. Usage: make materialize-yearly-features YEAR=2023
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make materialize-yearly-features YEAR=2023"; exit 1; fi
+	uv run python -c "from mibici_e21.features import materialize_yearly_trip_features; materialize_yearly_trip_features($(YEAR))"
+
+materialize-features-range: ## Materialize a range of gold features. Usage: make materialize-features-range START=2015 END=2024
+	@if [ -z "$(START)" ] || [ -z "$(END)" ]; then echo "Error: START and END are required. Example: make materialize-features-range START=2015 END=2024"; exit 1; fi
+	uv run python -c "from mibici_e21.features import materialize_features_range; materialize_features_range($(START), $(END))"
+
+train: ## Train the baseline models (P1, P2, P3) and log them to MLflow. Usage: make train YEAR=2023
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make train YEAR=2023"; exit 1; fi
+	uv run python -c "from mibici_e21.modeling.train import run_training_pipeline; run_training_pipeline($(YEAR))"
+
+predict: ## Score P1, P2, and P3 and write predictions. Usage: make predict YEAR=2024 SAVE_CSV=true
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1; fi
+	@case "$(SAVE_CSV)" in \
+		true|false) ;; \
+		*) echo "Error: SAVE_CSV must be true or false. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1 ;; \
+	esac
+	uv run python -c "from mibici_e21.modeling.predict import run_batch_inference; run_batch_inference($(YEAR), save_csv=$(SAVE_CSV_BOOL))"

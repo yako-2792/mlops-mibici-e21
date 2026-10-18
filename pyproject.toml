@@ -18,6 +18,8 @@ classifiers = [
 dependencies = [
     "huggingface-hub>=2.2.0",
     "loguru",
+    "matplotlib>=3.11.2",
+    "mlflow>=1.27.0",
     "pandas>=3.0.6",
     "pip",
     "pyarrow>=26.0.0",
@@ -25,6 +27,7 @@ dependencies = [
     "python-dotenv",
     "requests>=2.34.2",
     "ruff",
+    "scikit-learn>=1.9.1",
     "tqdm",
     "typer",
 ]

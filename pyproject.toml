@@ -18,12 +18,15 @@ classifiers = [
 dependencies = [
     "huggingface-hub>=2.2.0",
     "loguru",
+    "matplotlib>=3.11.2",
+    "pandas>=3.0.6",
     "pip",
     "pyarrow>=26.0.0",
     "pytest",
     "python-dotenv",
     "requests>=2.34.2",
     "ruff",
+    "seaborn>=0.13.2",
     "tqdm",
     "typer",
 ]

@@ -47,3 +47,28 @@ class StationColumns(StrEnum):
     LATITUDE = "latitude"
     LONGITUDE = "longitude"
     DPCAPACITY = "dpcapacity"
+
+
+class GoldColumns(StrEnum):
+    """Column names for a MiBici gold record.
+
+    - `DATE`: date.
+    - `HOUR`: hour.
+    - `DAY_OF_WEEK`: day of week.
+    - `IS_WEEKEND`: whether the day is a weekend.
+    - `DURATION_MINUTES`: duration in minutes.
+    - `STATION_ID`: station identifier.
+    - `DEPARTURES_COUNT`: number of departures.
+    - `ARRIVALS_COUNT`: number of arrivals.
+    - `NET_FLOW`: net flow.
+    """
+
+    DATE = "date"
+    HOUR = "hour"
+    DAY_OF_WEEK = "day_of_week"
+    IS_WEEKEND = "is_weekend"
+    DURATION_MINUTES = "duration_minutes"
+    STATION_ID = "station_id"
+    DEPARTURES_COUNT = "departures_count"
+    ARRIVALS_COUNT = "arrivals_count"
+    NET_FLOW = "net_flow"

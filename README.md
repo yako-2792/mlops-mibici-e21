@@ -1,210 +1,213 @@
-# MLOps MiBici Equipo 21
-- A0173318 Berenice Chapuli Xochimitl
-- A01702737 Walter Gonzalo Fernandez Deza
-- A01374964 Jesús Zabdiel Sánchez Chávez
-- A01639802 Alejandro Gil Ruiz
+# MLOps MiBici — Equipo 21
+
+Demand forecasting, station rebalancing, and clustering for the MiBici bike-sharing system, built on a data-lake ingestion pipeline.
+
+The pipeline downloads the public monthly catalogs, casts them to a strict PyArrow schema, and publishes Parquet files locally and, when requested, to the Hugging Face dataset.
+
+| ID | Name |
+| --- | --- |
+| A0173318 | Berenice Chapuli Xochimitl |
+| A01702737 | Walter Gonzalo Fernandez Deza |
+| A01374964 | Jesús Zabdiel Sánchez Chávez |
+| A01639802 | Alejandro Gil Ruiz |
 
 <div align="left">
-  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />&nbsp;&nbsp;
-  <img src="https://img.shields.io/badge/uv-DE5FE9?style=flat-square&logo=astral&logoColor=white" alt="uv" />&nbsp;&nbsp;
-  <img src="https://img.shields.io/badge/CCDS-328F97?style=flat-square&logo=cookiecutter&logoColor=white" alt="CCDS" />&nbsp;&nbsp;
-  <img src="https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white" alt="scikit-learn" />&nbsp;&nbsp;
-  <img src="https://img.shields.io/badge/MLflow-0194E2?style=flat-square&logo=mlflow&logoColor=white" alt="MLflow" />
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" />&nbsp;
+  <img src="https://img.shields.io/badge/uv-DE5FE9?style=flat-square&logo=astral&logoColor=white" alt="uv" />&nbsp;
+  <img src="https://img.shields.io/badge/PyArrow-FF6B00?style=flat-square&logo=apachearrow&logoColor=white" alt="PyArrow" />&nbsp;
+  <img src="https://img.shields.io/badge/Hugging%20Face-FFD21E?style=flat-square&logo=huggingface&logoColor=black" alt="Hugging Face" />&nbsp;
+  <img src="https://img.shields.io/badge/MLflow-0194E2?style=flat-square&logo=mlflow&logoColor=white" alt="MLflow" />&nbsp;
+  <img src="https://img.shields.io/badge/Ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black" alt="Ruff" />&nbsp;
+  <img src="https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikitlearn&logoColor=white" alt="scikit-learn" />
 </div>
 
-MLOps project for the MiBici bike-sharing system
+---
 
-## Project Organization
+## Contents
 
+- [Data architecture and pipeline](#data-architecture-and-pipeline)
+- [Quick start](#quick-start)
+- [Makefile](#makefile)
+- [Project organization](#project-organization)
+- [Git and GitHub workflow](#git-and-github-workflow)
+
+---
+
+## Data architecture and pipeline
+
+MiBici publishes one CSV per month. The file id in each URL comes from the catalog page, so the extractor reads that page instead of building the URL from the date.
+
+| Layer | Path | What happens |
+| --- | --- | --- |
+| Bronze | `data/temp/` | `extractor.py` downloads the trip and station CSVs. Months missing from the catalog are skipped. Trip files are saved as `datos_abiertos_YYYY_MM.csv`. |
+| Silver | `data/processed/` | `transformer.py` drops the original header, names columns by position, and casts them with PyArrow. Null tokens such as `NA` stay null. Timestamps are accepted as ISO-8601 or `%d/%m/%Y %H:%M`. `publisher.py` writes `mibici-trips-{year}.parquet` and `mibici-stations.parquet`. |
+| Share | Hugging Face | `pipeline.py` uploads those Parquet files when `HF=true`. The dataset is `yako2792/mibici-dataset`. Hugging Face versions the data: each upload or deletion is a commit on that dataset. |
+
+`make download-data` copies the published Parquet files back into `data/processed/` without running the scraper. The version history of those files lives in the Hugging Face dataset commits.
+
+---
+
+## Quick start
+
+> [!NOTE]
+> You need Python 3.11 and [`uv`](https://docs.astral.sh/uv/). On macOS, `brew install uv` is enough. `uv sync` creates the environment and installs the project.
+
+```bash
+git clone <repository-url>
+cd mlops-mibici-e21
+uv sync
 ```
-├── LICENSE            <- Open-source license if one is chosen
-├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
-├── README.md          <- The top-level README for developers using this project.
+
+> [!IMPORTANT]
+> Uploading to Hugging Face reads `HF_TOKEN` from a `.env` file in the project root. `.env` is gitignored. The dataset id is `HF_DATASET_REPO` in `mibici_e21/config.py` (`yako2792/mibici-dataset`), not an environment variable.
+>
+> ```bash
+> HF_TOKEN=hf_your_token_here
+> ```
+
+> [!TIP]
+> `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
+
+---
+
+## Makefile
+
+### Ingestion
+
+`HF` must be `true` or `false`. `YEAR` is required for one year. `START` and `END` are required for a range, and both ends are included.
+
+| Command | What it does |
+| --- | --- |
+| `make ingest-stations HF=false` | Download the station catalog and write `mibici-stations.parquet`. |
+| `make ingest-trips YEAR=2024 HF=true` | Ingest one year of trips and upload `mibici-trips-2024.parquet`. |
+| `make ingest-trips-range START=2015 END=2024 HF=true` | Ingest every year in the range, including both ends, and upload each Parquet file. |
+
+```bash
+make ingest-stations HF=false
+make ingest-trips YEAR=2024 HF=true
+make ingest-trips-range START=2015 END=2024 HF=true
+```
+
+### Dataset consumption
+
+| Command | What it does |
+| --- | --- |
+| `make download-data` | Download the dataset `*.parquet` files from Hugging Face into `data/processed/`. |
+
+```bash
+make download-data
+```
+
+### Maintenance
+
+`make clean` deletes compiled Python files. The data commands below are Python, so they behave the same on macOS, Linux, and Windows. They change local files only.
+
+| Command | What it does |
+| --- | --- |
+| `make clean-temp` | Remove the contents of `data/temp/` and keep the directory. |
+| `make clean-processed` | Remove `*.parquet` files in `data/processed/`. |
+| `make clean-all` | Run `clean-temp` and `clean-processed`. |
+| `make clean` | Delete `__pycache__` and `*.pyc` files. |
+
+```bash
+make clean-temp
+make clean-processed
+make clean-all
+```
+
+### Code quality
+
+| Command | What it does |
+| --- | --- |
+| `make lint` | Check formatting and Ruff rules. |
+| `make format` | Apply Ruff fixes and format the code. |
+| `make test` | Run the unit tests with pytest. |
+
+```bash
+make lint
+make format
+make test
+```
+
+### Setup
+
+| Command | What it does |
+| --- | --- |
+| `make requirements` | Install dependencies with `uv sync`. |
+| `make create_environment` | Create a virtual environment for Python 3.11. |
+
+---
+
+## Project organization
+
+```text
+├── Makefile                 <- ingest, download, clean, lint, format, and test
+├── README.md
+├── pyproject.toml           <- package metadata and Ruff configuration
 ├── data
-│   ├── external       <- Data from third party sources.
-│   ├── interim        <- Intermediate data that has been transformed.
-│   ├── processed      <- The final, canonical data sets for modeling.
-│   └── raw            <- The original, immutable data dump.
-│
-├── docs               <- A default mkdocs project; see www.mkdocs.org for details
-│
-├── models             <- Trained and serialized models, model predictions, or model summaries
-│
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`.
-│
-├── pyproject.toml     <- Project configuration file with package metadata for 
-│                         mibici_e21 and configuration for tools like black
-│
-├── references         <- Data dictionaries, manuals, and all other explanatory materials.
-│
-├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures        <- Generated graphics and figures to be used in reporting
-│
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
-│
-├── setup.cfg          <- Configuration file for flake8
-│
-└── mibici_e21   <- Source code for use in this project.
-    │
-    ├── __init__.py             <- Makes mibici_e21 a Python module
-    │
-    ├── config.py               <- Store useful variables and configuration
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
-    │
-    └── plots.py                <- Code to create visualizations
+│   ├── temp                 <- Bronze: CSVs downloaded by the extractor
+│   ├── processed            <- Silver: Parquet files for modeling
+│   ├── raw
+│   ├── interim
+│   └── external
+└── mibici_e21
+    ├── config.py            <- paths, Hugging Face repo, and HF_TOKEN
+    ├── dataset.py           <- download Parquet from Hugging Face and clean local data
+    ├── schemas
+    │   ├── columns.py       <- trip and station column names
+    │   ├── trips.py         <- TRIPS PyArrow schema
+    │   └── stations.py      <- STATIONS PyArrow schema
+    └── ingestion
+        ├── extractor.py     <- read the MiBici catalog and download CSVs
+        ├── transformer.py   <- positional names and PyArrow casts
+        ├── publisher.py     <- write Parquet and upload to Hugging Face
+        └── pipeline.py      <- year, range, and station ingestion
 ```
 
 ---
 
-## Prerequisites and Installation
+## Git and GitHub workflow
 
-This project uses `uv` for Python package and environment management.
+### Collaboration rules
 
-### 1. Install `uv`
+1. `main` is protected. Direct pushes are disabled.
+2. Every change enters through a pull request targeting `main`.
+3. Each member opens at least one pull request and reviews at least one teammate's pull request.
+4. Merging requires at least one approval and a passing linter.
 
-* **macOS / Linux:**
+### Branch names
 
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
+Create branches from `main` with these prefixes:
 
-* **Windows (PowerShell):**
+- `feat/<short-description>` adds a feature or model, for example `feat/ingestion-pipeline`.
+- `fix/<short-description>` fixes a bug, for example `fix/config-paths`.
+- `docs/<short-description>` updates documentation, for example `docs/readme-makefile`.
+- `refactor/<short-description>` restructures code without changing behavior.
 
-  ```powershell
-  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-  ```
-
-* **Homebrew (macOS):**
-
-  ```bash
-  brew install uv
-  ```
-
-* **Python | pip:**
-
-  ```bash
-  pip install uv
-  ```
-
-### 2. Project Setup
-
-1. Clone the repository
-
-   ```bash
-   git clone {url}
-   cd mlops-mibici-e21
-   ```
-
-2. Create environment and sync dependencies
-
-   ```bash
-   uv sync
-   ```
-
-### 3. Development Commands
-
-* Run linter (Ruff):
-
-  ```bash
-  uv run ruff check .
-  ```
-
-* Format code:
-
-  ```bash
-  uv run ruff format .
-  ```
-
-* Run main script:
-
-  ```bash
-  uv run main.py
-  ```
-
-## Git and GitHub Workflow (GitHub Flow)
-
-### Collaboration Rules
-
-1. Protected main branch: Direct pushes to main are disabled.
-2. Pull Requests (PR): All changes enter via PR targeting main.
-3. Mandatory PR requirements:
-   * Each member must open at least 1 Pull Request.
-   * Each member must review and approve at least 1 Pull Request from a teammate.
-   * Merging requires at least 1 approval and passing linter checks.
-
-### Branching Naming Convention
-
-Branches created from `main` using the following prefixes:
-
-* `feat/<short-description>`: New features or models (e.g., feat/ingestion-pipeline-p1).
-
-* `fix/<short-description>`: Bug fixes (e.g., fix/config-paths).
-
-* `docs/<short-description>`: Documentation updates (e.g., docs/ml-canvas-update).
-
-* `refactor/<short-description>`: Code refactoring without functional changes.
-
-### Commit Message Convention
-
-Format:
+### Commit messages
 
 ```text
 <type>: <description in lowercase>
 ```
 
-Allowed types:
+| Type | Use |
+| --- | --- |
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation |
+| `style` | Formatting and whitespace |
+| `refactor` | Restructuring without a behavior change |
+| `chore` | Maintenance, dependencies, and `.gitignore` |
 
-* `feat`: New feature.
+### Steps
 
-* `fix`: Bug fix.
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/my-feature
+git add .
+git commit -m "feat: add trip and station ingestion pipeline"
+git push origin feat/my-feature
+```
 
-* `docs`: Documentation changes.
-
-* `style`: Formatting, missing semicolons, whitespace.
-
-* `refactor`: Code refactoring.
-
-* `chore`: Maintenance, dependency updates, `.gitignore`.
-
-### Workflow Steps
-
-1. Update main branch:
-
-   ```bash
-   git checkout main
-   git pull origin main
-   ```
-
-2. Create a feature branch:
-
-   ```bash
-   git checkout -b feature/my-feature
-   ```
-
-3. Commit changes:
-
-   ```bash
-   git add .
-   git commit -m "feat(p1): implement baseline model for question 1"
-   ```
-
-4. Push branch:
-
-   ```bash
-   git push origin feat/my-feature
-   ```
-
-5. Open Pull Request on GitHub and request review.
-
-6. Merge after approval and delete remote/local feature branch (Squash and Merge).
+Open a pull request against `main`. After approval, squash-merge and delete the feature branch.

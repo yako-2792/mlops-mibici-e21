@@ -162,13 +162,13 @@ make test
 ## Project organization
 
 ```text
-├── Makefile                 <- ingest, download, clean, lint, format, and test
+├── Makefile                 <- ingest, download, features, train, predict, clean, lint, and test
 ├── README.md
 ├── pyproject.toml           <- package metadata and Ruff configuration
 ├── data
 │   ├── temp                 <- Bronze: CSVs downloaded by the extractor
 │   ├── raw                  <- Silver: data lake Parquet files
-│   ├── processed            <- Gold: trip features and station demand
+│   ├── processed            <- Gold: trip features, station demand, and predictions
 │   ├── interim
 │   └── external
 └── mibici_e21

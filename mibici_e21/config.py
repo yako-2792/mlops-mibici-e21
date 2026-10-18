@@ -1,16 +1,19 @@
+"""Paths and settings for the MiBici data lake, features, and models.
+
+`load_dotenv` runs on import so `HF_TOKEN` is available from a `.env` file.
+"""
+
 from dataclasses import dataclass
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from loguru import logger
 
 # Load environment variables from .env file if it exists
 load_dotenv()
 
 # Project paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
-logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
 
 DATA_DIR = PROJ_ROOT / "data"
 TEMP_DATA_DIR = DATA_DIR / "temp"
@@ -50,6 +53,7 @@ DATA_LAKE_SETTINGS = DataLakeSettings()
 
 
 # Feature store config
+@dataclass(frozen=True)
 class FeatureStoreSettings:
     """Settings for the feature store.
 
@@ -64,3 +68,49 @@ class FeatureStoreSettings:
 
 
 FEATURE_STORE_SETTINGS = FeatureStoreSettings()
+
+
+# Modeling config
+@dataclass(frozen=True)
+class ModelingSettings:
+    """Settings for baseline training.
+
+    - `SEED`: random seed for sampling and KMeans.
+    - `EXPERIMENT_NAME`: MLflow experiment that holds the baseline runs.
+    - `TEST_SPLIT_DATE`: first date of the test set, as `YYYY-MM-DD`.
+    - `BALANCE_THRESHOLD`: absolute daily balance that marks a station as
+      `possible_empty` or `possible_full`.
+    - `PICO_HOURS`: hours counted as peak departures.
+    - `KMEANS_CLUSTERS`: number of station clusters.
+    - `PROCESSED_DIR`: directory for gold demand Parquet files. Points at
+      `data/processed`.
+    """
+
+    SEED: int = 42
+    EXPERIMENT_NAME: str = "MiBici_Baselines_Equipo21"
+    TEST_SPLIT_DATE: str = "2023-10-01"
+    BALANCE_THRESHOLD: int = 5
+    PICO_HOURS: tuple[int, ...] = (7, 8, 9, 17, 18, 19)
+    KMEANS_CLUSTERS: int = 3
+    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+
+
+MODELING_SETTINGS = ModelingSettings()
+
+
+# Predict config
+@dataclass(frozen=True)
+class PredictSettings:
+    """Settings for baseline inference output.
+
+    - `P1_OUTPUT_DIR`: directory for P1 prediction files. Points at `data/processed`.
+    - `P2_OUTPUT_DIR`: directory for P2 prediction files. Points at `data/processed`.
+    - `P3_OUTPUT_DIR`: directory for P3 prediction files. Points at `data/processed`.
+    """
+
+    P1_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
+    P2_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
+    P3_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
+
+
+PREDICT_SETTINGS = PredictSettings()

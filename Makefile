@@ -7,12 +7,14 @@ PYTHON_VERSION = 3.11
 PYTHON_INTERPRETER = python
 HF ?= false
 PUSH_TO_HF = $(if $(filter true,$(HF)),True,False)
+SAVE_CSV ?= false
+SAVE_CSV_BOOL = $(if $(filter true,$(SAVE_CSV)),True,False)
 
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test create_environment data check-hf ingest-stations ingest-trips ingest-trips-range materialize-yearly-features materialize-features-range clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test create_environment data check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range train predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -89,3 +91,15 @@ materialize-yearly-features: ## Materialize one year of gold features. Usage: ma
 materialize-features-range: ## Materialize a range of gold features. Usage: make materialize-features-range START=2015 END=2024
 	@if [ -z "$(START)" ] || [ -z "$(END)" ]; then echo "Error: START and END are required. Example: make materialize-features-range START=2015 END=2024"; exit 1; fi
 	uv run python -c "from mibici_e21.features import materialize_features_range; materialize_features_range($(START), $(END))"
+
+train: ## Train the baseline models (P1, P2, P3) and log them to MLflow. Usage: make train YEAR=2023
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make train YEAR=2023"; exit 1; fi
+	uv run python -c "from mibici_e21.modeling.train import run_training_pipeline; run_training_pipeline($(YEAR))"
+
+predict: ## Score P1, P2, and P3 and write predictions. Usage: make predict YEAR=2024 SAVE_CSV=true
+	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1; fi
+	@case "$(SAVE_CSV)" in \
+		true|false) ;; \
+		*) echo "Error: SAVE_CSV must be true or false. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1 ;; \
+	esac
+	uv run python -c "from mibici_e21.modeling.predict import run_batch_inference; run_batch_inference($(YEAR), save_csv=$(SAVE_CSV_BOOL))"

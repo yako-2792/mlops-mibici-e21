@@ -35,16 +35,12 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 
 ## Data architecture and pipeline
 
-MiBici publishes one CSV per month. The file id in each URL comes from the catalog page, so the extractor reads that page instead of building the URL from the date.
+The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze, `data/temp/`), casts them to strict PyArrow schemas and publishes yearly Parquet files (silver, `data/raw/`, shared on Hugging Face), then cleans and aggregates them into the station-demand tables the baselines train on (gold, `data/processed/`).
 
-| Layer | Path | What happens |
-| --- | --- | --- |
-| Bronze | `data/temp/` | `extractor.py` downloads the trip and station CSVs. Months missing from the catalog are skipped. Trip files are saved as `datos_abiertos_YYYY_MM.csv`. |
-| Silver | `data/raw/` | `transformer.py` drops the original header, names columns by position, and casts them with PyArrow. Null tokens such as `NA` stay null. Timestamps are accepted as ISO-8601 or `%d/%m/%Y %H:%M`. `publisher.py` writes `mibici-trips-{year}.parquet` and `mibici-stations.parquet`. That folder is `DATA_LAKE_SETTINGS.PROCESSED_DIR`. |
-| Gold | `data/processed/` | `features.py` reads the yearly trip Parquet from `data/raw/` and writes `features_{year}.parquet` and `demand_aggregated_{year}.parquet`. |
-| Share | Hugging Face | `pipeline.py` uploads the silver Parquet files when `HF=true`. The dataset is `yako2792/mibici-dataset`. Hugging Face versions the data: each upload or deletion is a commit on that dataset. |
-
-`make download-data` copies the published Parquet files back into `data/raw/` without running the scraper. The version history of those files lives in the Hugging Face dataset commits.
+| Document | What it covers |
+| --- | --- |
+| [docs/data-pipeline.md](docs/data-pipeline.md) | Data source, ingestion and schemas, storage and versioning, cleaning and gold features, and the handoff to the baselines. |
+| [docs/testing-e2e-flow.md](docs/testing-e2e-flow.md) | Commands to download the data, build features, train, and predict end to end. |
 
 ---
 
@@ -171,9 +167,15 @@ make test
 │   ├── processed            <- Gold: trip features, station demand, and predictions
 │   ├── interim
 │   └── external
+├── docs
+│   ├── data-pipeline.md     <- data source, ingestion, storage, and gold processing
+│   ├── testing-e2e-flow.md  <- end-to-end download, features, train, and predict
+│   └── Machine Learning Canvas.pdf
 └── mibici_e21
     ├── config.py            <- paths, Hugging Face repo, and HF_TOKEN
     ├── dataset.py           <- download Parquet from Hugging Face and clean local data
+    ├── features.py          <- clean silver trips and build gold features
+    ├── plots.py             <- EDA figures into reports/figures
     ├── schemas
     │   ├── columns.py       <- trip and station column names
     │   ├── trips.py         <- TRIPS PyArrow schema

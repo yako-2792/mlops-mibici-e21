@@ -76,22 +76,30 @@ class ModelingSettings:
     """Settings for baseline training.
 
     - `SEED`: random seed for sampling and KMeans.
+    - `DEFAULT_YEAR`: year used for baseline training and evaluation.
+    - `TRACKING_URI`: MLflow tracking URI.
     - `EXPERIMENT_NAME`: MLflow experiment that holds the baseline runs.
     - `TEST_SPLIT_DATE`: first date of the test set, as `YYYY-MM-DD`.
     - `BALANCE_THRESHOLD`: absolute daily balance that marks a station as
       `possible_empty` or `possible_full`.
     - `PICO_HOURS`: hours counted as peak departures.
     - `KMEANS_CLUSTERS`: number of station clusters.
+    - `DEFAULT_N_ESTIMATORS`: number of trees in the Random Forest.
+    - `DEFAULT_MAX_DEPTH`: maximum depth of the Random Forest trees.
     - `PROCESSED_DIR`: directory for gold demand Parquet files. Points at
       `data/processed`.
     """
 
     SEED: int = 42
+    DEFAULT_YEAR: int = 2023
+    TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     EXPERIMENT_NAME: str = "MiBici_Baselines_Equipo21"
     TEST_SPLIT_DATE: str = "2023-10-01"
     BALANCE_THRESHOLD: int = 5
     PICO_HOURS: tuple[int, ...] = (7, 8, 9, 17, 18, 19)
     KMEANS_CLUSTERS: int = 3
+    DEFAULT_N_ESTIMATORS: int = 100
+    DEFAULT_MAX_DEPTH: int = 10
     PROCESSED_DIR: Path = PROCESSED_DATA_DIR
 
 

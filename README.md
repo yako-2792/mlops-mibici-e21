@@ -84,21 +84,37 @@ export MLFLOW_TRACKING_URI=[http://127.0.0.1:5000](http://127.0.0.1:5000)
 ```
 
 ```bash
+source .venv/bin/activate
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 
+# Datos
 mlflow run . -e ingest --env-manager=local
 
-# 3. Question 1: 
+# Baselines
 mlflow run . -e train -P question=p1 -P model=baseline --env-manager=local
-mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=300 -P max_depth=10 --env-manager=local
-
-# 4. Question 2: 
 mlflow run . -e train -P question=p2 -P model=baseline --env-manager=local
-mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=300 -P max_depth=10 --env-manager=local
+mlflow run . -e train -P question=p3 -P model=baseline --env-manager=local
 
-# 5. Question 3: 
-mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=3 --env-manager=local
+# P1: tres candidatas (la tercera sale de una búsqueda con nested runs)
+mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=100 -P max_depth=10 --env-manager=local
+mlflow run . -e train -P question=p1 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager=local
+mlflow run . -e train -P question=p1 -P model=rf -P search=true --env-manager=local
+
+# P2: tres candidatas
+mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=100 -P max_depth=10 --env-manager=local
+mlflow run . -e train -P question=p2 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager=local
+mlflow run . -e train -P question=p2 -P model=rf -P search=true --env-manager=local
+
+# P3: tres candidatas
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=4 --env-manager=local
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=5 --env-manager=local
+mlflow run . -e train -P question=p3 -P search=true --env-manager=local
+
+# Model Registry: registra la mejor candidata de cada pregunta con el alias champion
+mlflow run . -e register -P question=p1 --env-manager=local
+mlflow run . -e register -P question=p2 --env-manager=local
+mlflow run . -e register -P question=p3 --env-manager=local
 ```
-
 
 ---
 

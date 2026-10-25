@@ -13,6 +13,7 @@ entry_points:
       n_estimators: {type: int, default: 100}
       max_depth: {type: int, default: 10}
       n_clusters: {type: int, default: 3}
+      search: {type: str, default: "false"}
     command: >
       python -m mibici_e21.modeling.train
       --question {question}
@@ -20,3 +21,10 @@ entry_points:
       --n_estimators {n_estimators}
       --max_depth {max_depth}
       --n_clusters {n_clusters}
+      --search {search}
+
+  register:
+    parameters:
+      question: {type: str, default: "p1"}
+      run_id: {type: str, default: "auto"}
+    command: "python -m mibici_e21.modeling.register --question {question} --run_id {run_id}"

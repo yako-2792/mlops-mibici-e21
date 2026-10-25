@@ -15,10 +15,10 @@ import mlflow
 from mlflow.tracking import MlflowClient
 import pandas as pd
 
-from mibici_e21.config import MODELING_SETTINGS, PREDICT_SETTINGS, PROJ_ROOT
+from mibici_e21.config import MODELING_SETTINGS, PREDICT_SETTINGS
 from mibici_e21.schemas.columns import GoldColumns
 
-mlflow.set_tracking_uri((PROJ_ROOT / "mlruns").as_uri())
+mlflow.set_tracking_uri(MODELING_SETTINGS.TRACKING_URI)
 
 
 def get_latest_run_id(problem_tag: str) -> str:
@@ -39,7 +39,7 @@ def get_latest_run_id(problem_tag: str) -> str:
 
     runs = client.search_runs(
         experiment_ids=[experiment.experiment_id],
-        filter_string=f"tags.problem = '{problem_tag}'",
+        filter_string=f"tags.problem = '{problem_tag}' and tags.stage_of_work = 'baseline'",
         order_by=["attribute.start_time DESC"],
         max_results=1,
     )

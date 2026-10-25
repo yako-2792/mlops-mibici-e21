@@ -125,3 +125,11 @@ def clean_all_data_files() -> None:
     clean_interim_files()
     clean_processed_files()
     clean_external_files()
+
+
+if __name__ == "__main__":
+    from mibici_e21.config import MODELING_SETTINGS
+    from mibici_e21.features import materialize_yearly_trip_features
+
+    download_dataset()
+    materialize_yearly_trip_features(MODELING_SETTINGS.DEFAULT_YEAR)

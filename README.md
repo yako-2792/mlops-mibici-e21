@@ -27,6 +27,7 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 
 - [Data architecture and pipeline](#data-architecture-and-pipeline)
 - [Quick start](#quick-start)
+- [MLflow Tracking & Reproducibility (MLproject)](#mlflow-tracking--reproducibility-mlproject)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
 - [Git and GitHub workflow](#git-and-github-workflow)
@@ -53,6 +54,7 @@ The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze
 git clone <repository-url>
 cd mlops-mibici-e21
 uv sync
+source .venv/bin/activate
 ```
 
 > [!IMPORTANT]
@@ -64,6 +66,39 @@ uv sync
 
 > [!TIP]
 > `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
+
+---
+## MLflow Tracking & Reproducibility
+To guarantee experiment traceability and enable the Model Registry, we use a local tracking server backed by a SQLite database (`mlflow.db`). Both `mlflow.db` and `mlartifacts/` are excluded in `.gitignore`.
+
+In a dedicated terminal, start the local server supporting SQLite and custom artifact storage:
+
+```bash
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlartifacts --port 5000
+```
+
+In the terminal, point `MLFLOW_TRACKING_URI` to the local server:
+
+```bash
+export MLFLOW_TRACKING_URI=[http://127.0.0.1:5000](http://127.0.0.1:5000)
+```
+
+```bash
+
+mlflow run . -e ingest --env-manager=local
+
+# 3. Question 1: 
+mlflow run . -e train -P question=p1 -P model=baseline --env-manager=local
+mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=300 -P max_depth=10 --env-manager=local
+
+# 4. Question 2: 
+mlflow run . -e train -P question=p2 -P model=baseline --env-manager=local
+mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=300 -P max_depth=10 --env-manager=local
+
+# 5. Question 3: 
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=3 --env-manager=local
+```
+
 
 ---
 
@@ -158,33 +193,40 @@ make test
 ## Project organization
 
 ```text
-├── Makefile                 <- ingest, download, features, train, predict, clean, lint, and test
+├── Makefile                <- ingest, download, features, train, predict, clean, lint, and test
+├── MLproject               <- MLflow Project entry points (ingest, train) and parameters
+├── python_env.yaml         <- pinned Python environment for MLflow reproducibility
 ├── README.md
-├── pyproject.toml           <- package metadata and Ruff configuration
+├── pyproject.toml          <- package metadata and Ruff configuration
 ├── data
-│   ├── temp                 <- Bronze: CSVs downloaded by the extractor
-│   ├── raw                  <- Silver: data lake Parquet files
-│   ├── processed            <- Gold: trip features, station demand, and predictions
+│   ├── temp                <- Bronze: CSVs downloaded by the extractor
+│   ├── raw                 <- Silver: data lake Parquet files
+│   ├── processed           <- Gold: trip features, station demand, and predictions
 │   ├── interim
 │   └── external
 ├── docs
-│   ├── data-pipeline.md     <- data source, ingestion, storage, and gold processing
-│   ├── testing-e2e-flow.md  <- end-to-end download, features, train, and predict
+│   ├── data-pipeline.md    <- data source, ingestion, storage, and gold processing
+│   ├── testing-e2e-flow.md <- end-to-end download, features, train, and predict
 │   └── Machine Learning Canvas.pdf
+├── reports
+│   └── figures             <- generated EDA plots (demanda_hora.png, top_estaciones.png, total_dias.png)
 └── mibici_e21
-    ├── config.py            <- paths, Hugging Face repo, and HF_TOKEN
-    ├── dataset.py           <- download Parquet from Hugging Face and clean local data
-    ├── features.py          <- clean silver trips and build gold features
-    ├── plots.py             <- EDA figures into reports/figures
+    ├── config.py           <- paths, Hugging Face repo, HF_TOKEN, and MLflow/modeling settings
+    ├── dataset.py          <- download Parquet from Hugging Face and clean local data
+    ├── features.py         <- clean silver trips and build gold features
+    ├── plots.py            <- EDA figures into reports/figures
+    ├── modeling
+    │   ├── train.py        <- train baselines and candidate models, log to MLflow & Registry
+    │   └── predict.py      <- batch inference for P1, P2, and P3
     ├── schemas
-    │   ├── columns.py       <- trip and station column names
-    │   ├── trips.py         <- TRIPS PyArrow schema
-    │   └── stations.py      <- STATIONS PyArrow schema
+    │   ├── columns.py      <- trip and station column names
+    │   ├── trips.py        <- TRIPS PyArrow schema
+    │   └── stations.py     <- STATIONS PyArrow schema
     └── ingestion
-        ├── extractor.py     <- read the MiBici catalog and download CSVs
-        ├── transformer.py   <- positional names and PyArrow casts
-        ├── publisher.py     <- write Parquet and upload to Hugging Face
-        └── pipeline.py      <- year, range, and station ingestion
+        ├── extractor.py    <- read the MiBici catalog and download CSVs
+        ├── transformer.py  <- positional names and PyArrow casts
+        ├── publisher.py    <- write Parquet and upload to Hugging Face
+        └── pipeline.py     <- year, range, and station ingestion
 ```
 
 ---

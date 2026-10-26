@@ -6,7 +6,7 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 
 | ID | Name |
 | --- | --- |
-| A0173318 | Berenice Chapuli Xochimitl |
+| A01733218 | Berenice Chapuli Xochimitl |
 | A01702737 | Walter Gonzalo Fernandez Deza |
 | A01374964 | Jesús Zabdiel Sánchez Chávez |
 | A01639802 | Alejandro Gil Ruiz |

@@ -35,6 +35,8 @@ class DataLakeSettings:
 
     - `MIBICI_BASE_URL`: base URL of the public MiBici file directory.
     - `HF_DATASET_REPO`: Hugging Face dataset repository, as `owner/name`.
+    - `HF_DATASET_REVISION`: dataset commit the ingestion downloads, so every clone trains on
+      the same files. Update it on purpose to train on a newer snapshot.
     - `TEMP_DIR`: local directory for temporary downloads.
     - `RAW_DIR`: local directory for raw files.
     - `HF_TOKEN`: Hugging Face token, read from the `HF_TOKEN` environment variable.
@@ -43,6 +45,7 @@ class DataLakeSettings:
 
     MIBICI_BASE_URL: str = "https://www.mibici.net/site/assets/files/"
     HF_DATASET_REPO: str = "yako2792/mibici-dataset"
+    HF_DATASET_REVISION: str = "11e35bd665983aad17d70b921ccf5c5218294c9d"
     TEMP_DIR: Path = TEMP_DATA_DIR
     RAW_DIR: Path = RAW_DATA_DIR
     HF_TOKEN: str | None = os.getenv("HF_TOKEN")

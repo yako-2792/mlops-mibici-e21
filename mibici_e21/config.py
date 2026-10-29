@@ -70,6 +70,25 @@ class FeatureStoreSettings:
 FEATURE_STORE_SETTINGS = FeatureStoreSettings()
 
 
+# Tracking config
+@dataclass(frozen=True)
+class TrackingSettings:
+    """Settings for the MLflow tracking server.
+
+    - `TRACKING_URI`: MLflow tracking server, read from `MLFLOW_TRACKING_URI`.
+    - `EXPERIMENT_NAME`: experiment that holds every ingestion, baseline, search, and
+      candidate run. `mlflow run` reads it from `MLFLOW_EXPERIMENT_NAME`, so both must match.
+    - `TEAM`: team number recorded in the `team` tag.
+    """
+
+    TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+    EXPERIMENT_NAME: str = "mibici-equipo21"
+    TEAM: str = "21"
+
+
+TRACKING_SETTINGS = TrackingSettings()
+
+
 # Modeling config
 @dataclass(frozen=True)
 class ModelingSettings:

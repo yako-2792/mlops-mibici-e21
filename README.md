@@ -1,8 +1,12 @@
 # MLOps MiBici — Equipo 21
 
-Demand forecasting, station rebalancing, and clustering for the MiBici bike-sharing system, built on a data-lake ingestion pipeline.
+Demand forecasting, station risk classification, and station clustering for the MiBici bike-sharing system in Guadalajara, packaged as a reproducible [MLflow Project](https://mlflow.org/docs/latest/ml/projects/) on top of a data-lake ingestion pipeline.
 
-The pipeline downloads the public monthly catalogs, casts them to a strict PyArrow schema, and publishes Parquet files locally and, when requested, to the Hugging Face dataset.
+| Question | Task | What it answers | Registered model |
+| --- | --- | --- | --- |
+| P1 | Regression | How many bikes leave each station in each hour? | `mibici-equipo21-p1-demanda` |
+| P2 | Classification | Which stations will end the day empty or full? | `mibici-equipo21-p2-riesgo` |
+| P3 | Clustering | Which stations behave alike, so they can be rebalanced as a group? | `mibici-equipo21-p3-grupos` |
 
 | ID | Name |
 | --- | --- |
@@ -12,7 +16,7 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 | A01639802 | Alejandro Gil Ruiz |
 
 <div align="left">
-  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" />&nbsp;
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11" />&nbsp;
   <img src="https://img.shields.io/badge/uv-DE5FE9?style=flat-square&logo=astral&logoColor=white" alt="uv" />&nbsp;
   <img src="https://img.shields.io/badge/PyArrow-FF6B00?style=flat-square&logo=apachearrow&logoColor=white" alt="PyArrow" />&nbsp;
   <img src="https://img.shields.io/badge/Hugging%20Face-FFD21E?style=flat-square&logo=huggingface&logoColor=black" alt="Hugging Face" />&nbsp;
@@ -41,7 +45,7 @@ The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze
 
 | Document | What it covers |
 | --- | --- |
-| [docs/data-pipeline.md](docs/data-pipeline.md) | Data source, ingestion and schemas, storage and versioning, cleaning and gold features, and the handoff to the baselines. |
+| [docs/data-pipeline.md](docs/data-pipeline.md) | Data source, ingestion and schemas, storage and versioning, cleaning and gold features, and the handoff to modeling. |
 | [docs/testing-e2e-flow.md](docs/testing-e2e-flow.md) | Steps from a clean clone to batch predictions served by the champion models. |
 
 ---
@@ -49,10 +53,10 @@ The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze
 ## Quick start
 
 > [!NOTE]
-> You need Python 3.11 and [`uv`](https://docs.astral.sh/uv/). On macOS, `brew install uv` is enough. `uv sync` creates the environment and installs the project.
+> You need Python 3.11 and [`uv`](https://docs.astral.sh/uv/getting-started/installation/). `uv sync` creates `.venv` with the locked dependencies of `uv.lock`, including the development tools.
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/yako-2792/mlops-mibici-e21.git
 cd mlops-mibici-e21
 uv sync
 source .venv/bin/activate
@@ -68,10 +72,13 @@ source .venv/bin/activate
 > [!TIP]
 > `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
 
+To train and register the models, continue with [MLflow Project and tracking](#mlflow-project-and-tracking).
+
 ---
+
 ## MLflow Project and tracking
 
-The repository is an [MLflow Project](https://mlflow.org/docs/latest/ml/projects/): every ingestion, baseline, search, and candidate run is launched with `mlflow run`, and all of them live in one experiment, `mibici-equipo21`. The `stage_of_work` tag tells baselines, searches, and candidates apart.
+Every ingestion, baseline, search, and candidate run is launched with `mlflow run`, and all of them live in one experiment, `mibici-equipo21`. The `stage_of_work` tag tells baselines, searches, and candidates apart.
 
 ### 1. Start the tracking server
 
@@ -116,8 +123,10 @@ A model ignores hyperparameters it does not use, and a candidate without its hyp
 
 ### 4. Reproduce every run from a clean clone
 
+With the tracking server running:
+
 ```bash
-git clone <repository-url>
+git clone https://github.com/yako-2792/mlops-mibici-e21.git
 cd mlops-mibici-e21
 uv sync
 source .venv/bin/activate
@@ -156,11 +165,17 @@ mlflow run . -e register -P question=p3 --env-manager uv
 
 Results of the commands above on dataset revision `11e35bd`. Each champion beats its baseline on the validation metric, which is the metric the registry compares.
 
-| Question | Champion | Baseline → champion (validation) | Baseline → champion (test) | Challenger |
-| --- | --- | --- | --- | --- |
-| P1 | Random forest, 200 trees, depth 20 | `val_MAE` 1.423 → 1.296 (8.9% lower) | `test_MAE` 1.469 → 1.294, `test_R2` 0.481 → 0.594 | Boosting, 400 iterations, depth 14 (`val_MAE` 1.349, 3.4× faster to train) |
-| P2 | Random forest, 200 trees, depth 14 | `val_f1_macro` 0.641 → 0.666 | `test_f1_macro` 0.631 → 0.664, recall of `possible_empty` 0.47 → 0.72 and `possible_full` 0.51 → 0.76 | Boosting, 100 iterations, depth 20 (`val_f1_macro` 0.660) |
-| P3 | KMeans, k=2 | `silhouette` 0.595 → 0.614 | No test split: clustering fits the whole year | None: no other candidate beats the baseline |
+| Question | Champion model | Metric | Baseline | Champion |
+| --- | --- | --- | ---: | ---: |
+| P1 | Random forest, 200 trees, depth 20 | `val_MAE` | 1.423 | **1.296** |
+| | | `test_MAE` | 1.469 | **1.294** |
+| P2 | Random forest, 200 trees, depth 14 | `val_f1_macro` | 0.641 | **0.666** |
+| | | `test_f1_macro` | 0.631 | **0.664** |
+| | | `test_recall_possible_empty` | 0.47 | **0.72** |
+| | | `test_recall_possible_full` | 0.51 | **0.76** |
+| P3 | KMeans, k=2 | `silhouette` | 0.595 | **0.614** |
+
+The `challenger` of P1 is boosting with 400 iterations and depth 14 (`val_MAE` 1.349, 3.4× faster to train). The `challenger` of P2 is boosting with 100 iterations and depth 20 (`val_f1_macro` 0.660). P3 has no challenger, because no other candidate beats its baseline, and no test split, because clustering fits the whole year.
 
 To reproduce only the chosen models from a clean clone, run `ingest`, the baseline of each question, and these commands, then `register`:
 
@@ -230,7 +245,7 @@ predictions = model.predict(model.input_example)
 
 ### MLflow Project
 
-These targets wrap `mlflow run` with `--env-manager uv` and export `MLFLOW_TRACKING_URI` and `MLFLOW_EXPERIMENT_NAME` from `config.py`. `ENV_MANAGER=local` reuses the active environment.
+These targets wrap `mlflow run` with `--env-manager uv`. They export `MLFLOW_TRACKING_URI` and `MLFLOW_EXPERIMENT_NAME` from `config.py`, so no manual export is needed, and values already set in the shell win. Start the server first with `make mlflow-server`. `ENV_MANAGER=local` reuses the active environment.
 
 | Command | What it does |
 | --- | --- |

@@ -28,7 +28,8 @@ class DemandQuestion(SupervisedQuestion):
     """How many bikes leave each station in each hour.
 
     The baseline is the training mean of the station and hour. MAE is the selection
-    metric, because the rebalancing plan is sized in bikes per hour.
+    metric, because the rebalancing plan is sized in bikes per hour. Gradient boosting uses
+    a Poisson loss, because departures are counts and must never be predicted negative.
     """
 
     key = "p1"
@@ -66,7 +67,10 @@ class DemandQuestion(SupervisedQuestion):
             family="hist_gradient_boosting",
             hyperparameters=("n_estimators", "max_depth"),
             build=lambda params: HistGradientBoostingRegressor(
-                max_iter=params["n_estimators"], max_depth=params["max_depth"], random_state=SEED
+                loss="poisson",
+                max_iter=params["n_estimators"],
+                max_depth=params["max_depth"],
+                random_state=SEED,
             ),
         ),
     }

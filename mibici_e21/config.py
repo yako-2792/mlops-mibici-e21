@@ -122,8 +122,8 @@ class ModelingSettings:
     RISK_LAGS: tuple[int, ...] = (1, 7)
     BASELINE_CLUSTERS: int = 3
     KMEANS_N_INIT: int = 10
-    SEARCH_N_ESTIMATORS: tuple[int, ...] = (50, 100)
-    SEARCH_MAX_DEPTH: tuple[int, ...] = (6, 12)
+    SEARCH_N_ESTIMATORS: tuple[int, ...] = (100, 200, 400)
+    SEARCH_MAX_DEPTH: tuple[int, ...] = (8, 14, 20)
     SEARCH_N_CLUSTERS: tuple[int, ...] = (2, 3, 4, 5, 6)
     PLOT_SAMPLE_SIZE: int = 2000
     PROCESSED_DIR: Path = PROCESSED_DATA_DIR

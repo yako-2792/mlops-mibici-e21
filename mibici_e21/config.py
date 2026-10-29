@@ -1,6 +1,7 @@
-"""Paths and settings for the MiBici data lake, features, and models.
+"""Paths and settings for the MiBici data lake, features, tracking, and models.
 
-`load_dotenv` runs on import so `HF_TOKEN` is available from a `.env` file.
+`load_dotenv` runs on import, so `HF_TOKEN` and the MLflow variables can live in a `.env`
+file. `huggingface_hub` reads `HF_TOKEN` from the environment when it uploads.
 """
 
 from dataclasses import dataclass
@@ -9,10 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file if it exists
 load_dotenv()
 
-# Project paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJ_ROOT / "data"
@@ -37,19 +36,15 @@ class DataLakeSettings:
     - `HF_DATASET_REPO`: Hugging Face dataset repository, as `owner/name`.
     - `HF_DATASET_REVISION`: dataset commit the ingestion downloads, so every clone trains on
       the same files. Update it on purpose to train on a newer snapshot.
-    - `TEMP_DIR`: local directory for temporary downloads.
-    - `RAW_DIR`: local directory for raw files.
-    - `HF_TOKEN`: Hugging Face token, read from the `HF_TOKEN` environment variable.
-    - `PROCESSED_DIR`: data lake output for the yearly Parquet files. Points at `data/raw`.
+    - `TEMP_DIR`: bronze layer, the downloaded CSVs (`data/temp`).
+    - `SILVER_DIR`: silver layer, the yearly trip and station Parquet files (`data/raw`).
     """
 
     MIBICI_BASE_URL: str = "https://www.mibici.net/site/assets/files/"
     HF_DATASET_REPO: str = "yako2792/mibici-dataset"
     HF_DATASET_REVISION: str = "11e35bd665983aad17d70b921ccf5c5218294c9d"
     TEMP_DIR: Path = TEMP_DATA_DIR
-    RAW_DIR: Path = RAW_DATA_DIR
-    HF_TOKEN: str | None = os.getenv("HF_TOKEN")
-    PROCESSED_DIR: Path = RAW_DATA_DIR
+    SILVER_DIR: Path = RAW_DATA_DIR
 
 
 DATA_LAKE_SETTINGS = DataLakeSettings()
@@ -62,12 +57,13 @@ class FeatureStoreSettings:
 
     - `MAX_TRIP_DURATION_MINUTES`: maximum trip duration in minutes. Defaults to 8 hours.
     - `MIN_TRIP_DURATION_MINUTES`: minimum trip duration in minutes. Defaults to 0 minutes.
-    - `PROCESSED_DIR`: directory for gold feature Parquet files. Points at `data/processed`.
+    - `GOLD_DIR`: gold layer, the trip features, station demand, and data manifests
+      (`data/processed`).
     """
 
     MAX_TRIP_DURATION_MINUTES: float = 480.0
     MIN_TRIP_DURATION_MINUTES: float = 0.0
-    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+    GOLD_DIR: Path = PROCESSED_DATA_DIR
 
 
 FEATURE_STORE_SETTINGS = FeatureStoreSettings()
@@ -111,7 +107,6 @@ class ModelingSettings:
     - `SEARCH_N_ESTIMATORS`, `SEARCH_MAX_DEPTH`: grid of the P1 and P2 searches.
     - `SEARCH_N_CLUSTERS`: values of `k` tried by the P3 search.
     - `PLOT_SAMPLE_SIZE`: points drawn in scatter plots.
-    - `PROCESSED_DIR`: directory of the gold demand Parquet files (`data/processed`).
     """
 
     SEED: int = 42
@@ -127,7 +122,6 @@ class ModelingSettings:
     SEARCH_MAX_DEPTH: tuple[int, ...] = (8, 14, 20)
     SEARCH_N_CLUSTERS: tuple[int, ...] = (2, 3, 4, 5, 6)
     PLOT_SAMPLE_SIZE: int = 2000
-    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
 
 
 MODELING_SETTINGS = ModelingSettings()

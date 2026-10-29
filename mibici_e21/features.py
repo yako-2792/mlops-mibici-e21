@@ -11,19 +11,17 @@ from mibici_e21.schemas.columns import GoldColumns, StationColumns, TripColumns
 
 def load_silver_trips(
     year: int,
-    processed_dir: Path | None = None,
+    silver_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Load `mibici-trips-{year}.parquet` from the data lake.
 
     - `year`: trip year used in the file name.
-    - `processed_dir`: directory that holds the silver Parquet files. Defaults to
-      `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    - `silver_dir`: directory that holds the silver Parquet files. Defaults to
+      `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
 
     Raises `FileNotFoundError` when that file is not in the directory.
     """
-    if processed_dir is None:
-        processed_dir = DATA_LAKE_SETTINGS.PROCESSED_DIR
-    input_path = processed_dir / f"mibici-trips-{year}.parquet"
+    input_path = (silver_dir or DATA_LAKE_SETTINGS.SILVER_DIR) / f"mibici-trips-{year}.parquet"
     if not input_path.exists():
         raise FileNotFoundError(f"Parquet file for trips not found for year {year}: {input_path}")
 
@@ -134,15 +132,15 @@ def _clean_and_filter_trips(df: pd.DataFrame) -> pd.DataFrame:
 
 def materialize_yearly_trip_features(
     year: int,
-    processed_dir: Path = FEATURE_STORE_SETTINGS.PROCESSED_DIR,
+    gold_dir: Path = FEATURE_STORE_SETTINGS.GOLD_DIR,
 ) -> tuple[Path, Path]:
     """Write `features_{year}.parquet` and `demand_aggregated_{year}.parquet`.
 
     - `year`: trip year to read and to use in the output names.
-    - `processed_dir`: directory for the written files. Defaults to
-      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+    - `gold_dir`: directory for the written files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
 
-    Silver trips are read from `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    Silver trips are read from `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
     Returns the path of the trip-feature file and the path of the demand file.
     """
     df_silver = load_silver_trips(year)
@@ -150,8 +148,8 @@ def materialize_yearly_trip_features(
     df_features = _extract_trip_features(df_clean)
     df_demand = _aggregate_station_demand(df_clean)
 
-    output_features = processed_dir / f"features_{year}.parquet"
-    output_demand = processed_dir / f"demand_aggregated_{year}.parquet"
+    output_features = gold_dir / f"features_{year}.parquet"
+    output_demand = gold_dir / f"demand_aggregated_{year}.parquet"
     df_features.to_parquet(output_features, index=False, engine="pyarrow")
     df_demand.to_parquet(output_demand, index=False, engine="pyarrow")
 
@@ -160,16 +158,16 @@ def materialize_yearly_trip_features(
     return output_features, output_demand
 
 
-def load_gold_demand(year: int, processed_dir: Path | None = None) -> pd.DataFrame:
+def load_gold_demand(year: int, gold_dir: Path | None = None) -> pd.DataFrame:
     """Load `demand_aggregated_{year}.parquet` with `date` parsed to datetime.
 
     - `year`: demand year used in the file name.
-    - `processed_dir`: directory of the gold files. Defaults to
-      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+    - `gold_dir`: directory of the gold files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
 
     Raises `FileNotFoundError` when the file is missing.
     """
-    directory = processed_dir or FEATURE_STORE_SETTINGS.PROCESSED_DIR
+    directory = gold_dir or FEATURE_STORE_SETTINGS.GOLD_DIR
     demand_path = directory / f"demand_aggregated_{year}.parquet"
     if not demand_path.exists():
         raise FileNotFoundError(
@@ -182,15 +180,15 @@ def load_gold_demand(year: int, processed_dir: Path | None = None) -> pd.DataFra
     return demand
 
 
-def load_station_locations(raw_dir: Path | None = None) -> pd.DataFrame:
+def load_station_locations(silver_dir: Path | None = None) -> pd.DataFrame:
     """Load the id, latitude, and longitude of every station from the station catalog.
 
-    - `raw_dir`: directory of the silver files. Defaults to `DATA_LAKE_SETTINGS.PROCESSED_DIR`.
+    - `silver_dir`: directory of the silver files. Defaults to `DATA_LAKE_SETTINGS.SILVER_DIR`.
 
     The id column is renamed to `station_id`, to join with the gold demand. Raises
     `FileNotFoundError` when the catalog is missing.
     """
-    path = (raw_dir or DATA_LAKE_SETTINGS.PROCESSED_DIR) / "mibici-stations.parquet"
+    path = (silver_dir or DATA_LAKE_SETTINGS.SILVER_DIR) / "mibici-stations.parquet"
     if not path.exists():
         raise FileNotFoundError(f"No station catalog at {path}. Run `mlflow run . -e ingest`.")
     columns = [StationColumns.ID, StationColumns.LATITUDE, StationColumns.LONGITUDE]
@@ -201,16 +199,16 @@ def load_station_locations(raw_dir: Path | None = None) -> pd.DataFrame:
 def materialize_features_range(
     start_year: int,
     end_year: int,
-    processed_dir: Path = FEATURE_STORE_SETTINGS.PROCESSED_DIR,
+    gold_dir: Path = FEATURE_STORE_SETTINGS.GOLD_DIR,
 ) -> list[tuple[Path, Path]]:
     """Write trip features and station demand for each year in the range.
 
     - `start_year`: first year to read. It is included.
     - `end_year`: last year to read. It is included.
-    - `processed_dir`: directory for the written files. Defaults to
-      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+    - `gold_dir`: directory for the written files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
 
-    Silver trips are read from `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    Silver trips are read from `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
 
     Each year is handled like `materialize_yearly_trip_features`. A missing year raises
     `FileNotFoundError`. Returns one `(features path, demand path)` pair per year.
@@ -218,7 +216,7 @@ def materialize_features_range(
     logger.info(f"Materializing features for {start_year}-{end_year}")
     generated_files = []
     for year in range(start_year, end_year + 1):
-        paths = materialize_yearly_trip_features(year, processed_dir=processed_dir)
+        paths = materialize_yearly_trip_features(year, gold_dir=gold_dir)
         generated_files.append(paths)
     logger.info(f"Feature range complete: {len(generated_files)} years")
     return generated_files

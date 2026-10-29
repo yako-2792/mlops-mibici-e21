@@ -47,7 +47,7 @@ def plot_busiest_stations(trips: pd.DataFrame) -> plt.Figure:
 
 def write_figures(year: int) -> None:
     """Write the exploratory figures of a year as PNG files in `reports/figures`."""
-    directory = FEATURE_STORE_SETTINGS.PROCESSED_DIR
+    directory = FEATURE_STORE_SETTINGS.GOLD_DIR
     demand = pd.read_parquet(directory / f"demand_aggregated_{year}.parquet")
     trips = pd.read_parquet(directory / f"features_{year}.parquet")
     figures = {

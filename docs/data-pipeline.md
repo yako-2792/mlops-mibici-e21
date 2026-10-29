@@ -127,8 +127,7 @@ make ingest-trips-range START=2015 END=2024 HF=true
 
 Silver files are Parquet with PyArrow's default Snappy compression, one file per year.
 
-> [!NOTE]
-> `DATA_LAKE_SETTINGS.PROCESSED_DIR` points at `data/raw/`, not `data/processed/`. In the data lake settings, "processed" means the silver Parquet output of ingestion. Gold files use `FEATURE_STORE_SETTINGS.PROCESSED_DIR`, which is `data/processed/`.
+The paths live in `mibici_e21/config.py`: `DATA_LAKE_SETTINGS.TEMP_DIR` (bronze), `DATA_LAKE_SETTINGS.SILVER_DIR` (silver), and `FEATURE_STORE_SETTINGS.GOLD_DIR` (gold).
 
 ### Hugging Face dataset
 

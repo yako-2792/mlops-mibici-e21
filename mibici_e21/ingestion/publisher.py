@@ -15,17 +15,17 @@ class MiBiciPublisher:
 
     def __init__(
         self,
-        processed_dir: Path = DATA_LAKE_SETTINGS.PROCESSED_DIR,
+        output_dir: Path = DATA_LAKE_SETTINGS.SILVER_DIR,
         hf_repo_id: str | None = DATA_LAKE_SETTINGS.HF_DATASET_REPO,
     ) -> None:
         """Create a publisher.
 
-        - `processed_dir`: directory where Parquet files are written.
+        - `output_dir`: directory where Parquet files are written.
         - `hf_repo_id`: Hugging Face dataset repository, as `owner/name`.
         """
-        self.processed_dir = processed_dir
+        self.output_dir = output_dir
         self.hf_repo_id = hf_repo_id
-        self.processed_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self._api = HfApi() if hf_repo_id else None
 
     def publish_trips_yearly(self, tables: list[pa.Table], year: int) -> Path:
@@ -39,14 +39,14 @@ class MiBiciPublisher:
             raise ValueError(f"No tables provided for year {year}")
 
         yearly_table = pa.concat_tables(tables)
-        target_path = self.processed_dir / f"mibici-trips-{year}.parquet"
+        target_path = self.output_dir / f"mibici-trips-{year}.parquet"
         pq.write_table(yearly_table, target_path)
         logger.info(f"Wrote {target_path.name} ({yearly_table.num_rows:,} rows)")
         return target_path
 
     def publish_stations(self, table: pa.Table, filename: str = "mibici-stations.parquet") -> Path:
         """Write the station table to `mibici-stations.parquet`."""
-        target_path = self.processed_dir / filename
+        target_path = self.output_dir / filename
         pq.write_table(table, target_path)
         logger.info(f"Wrote {target_path.name} ({table.num_rows:,} rows)")
         return target_path
@@ -54,12 +54,12 @@ class MiBiciPublisher:
     def sync_to_huggingface(self, local_path: Path | str, path_in_repo: str | None = None) -> None:
         """Upload a local Parquet file to the configured Hugging Face dataset.
 
-        A relative `local_path` is resolved inside `processed_dir`. The path
+        A relative `local_path` is resolved inside `output_dir`. The path
         inside the repository defaults to the file name.
         """
         path = Path(local_path)
         if not path.is_absolute():
-            path = self.processed_dir / path
+            path = self.output_dir / path
 
         if not path.exists():
             logger.error(f"Local file not found: {path.name}")

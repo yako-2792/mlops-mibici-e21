@@ -32,7 +32,7 @@ def download_dataset(
     years: list[int] | None = None,
     repo_id: str = DATA_LAKE_SETTINGS.HF_DATASET_REPO,
     revision: str = DATA_LAKE_SETTINGS.HF_DATASET_REVISION,
-    output_dir: Path = DATA_LAKE_SETTINGS.PROCESSED_DIR,
+    output_dir: Path = DATA_LAKE_SETTINGS.SILVER_DIR,
 ) -> Path:
     """Download trip Parquet files and the station catalog of a pinned dataset revision.
 
@@ -68,7 +68,7 @@ def trips_file_name(year: int) -> str:
 
 def data_manifest_path(year: int) -> Path:
     """Return the path of the data manifest of a year, next to its gold files."""
-    return FEATURE_STORE_SETTINGS.PROCESSED_DIR / f"data_manifest_{year}.json"
+    return FEATURE_STORE_SETTINGS.GOLD_DIR / f"data_manifest_{year}.json"
 
 
 def build_data_manifest(year: int, files: dict[str, Path]) -> dict:
@@ -102,7 +102,7 @@ def read_data_manifest(year: int) -> dict:
         )
     manifest = json.loads(path.read_text(encoding="utf-8"))
     demand = manifest["files"]["gold_demand"]
-    demand_path = FEATURE_STORE_SETTINGS.PROCESSED_DIR / demand["name"]
+    demand_path = FEATURE_STORE_SETTINGS.GOLD_DIR / demand["name"]
     if _sha256(demand_path) != demand["sha256"]:
         raise ValueError(f"{demand_path.name} does not match its manifest. Run ingest again.")
     return manifest
@@ -118,8 +118,8 @@ def ingest_year(year: int) -> Path:
     manifest = build_data_manifest(
         year,
         {
-            "stations": DATA_LAKE_SETTINGS.PROCESSED_DIR / STATIONS_FILE_NAME,
-            "silver": DATA_LAKE_SETTINGS.PROCESSED_DIR / trips_file_name(year),
+            "stations": DATA_LAKE_SETTINGS.SILVER_DIR / STATIONS_FILE_NAME,
+            "silver": DATA_LAKE_SETTINGS.SILVER_DIR / trips_file_name(year),
             "gold_features": features_path,
             "gold_demand": demand_path,
         },

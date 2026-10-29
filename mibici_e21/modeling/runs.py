@@ -14,7 +14,7 @@ from mlflow.models import infer_signature
 import mlflow.sklearn
 import pandas as pd
 
-from mibici_e21.config import MODELING_SETTINGS, PROJ_ROOT
+from mibici_e21.config import FEATURE_STORE_SETTINGS, MODELING_SETTINGS, PROJ_ROOT
 from mibici_e21.dataset import data_manifest_path
 from mibici_e21.modeling.base import (
     BASELINE,
@@ -157,7 +157,7 @@ def _log_data(question: Question, evaluation: Evaluation, year: int) -> None:
     The frames are aggregated by station, so no rider data reaches MLflow.
     """
     log_data_manifest(data_manifest_path(year))
-    source = MODELING_SETTINGS.PROCESSED_DIR / f"demand_aggregated_{year}.parquet"
+    source = FEATURE_STORE_SETTINGS.GOLD_DIR / f"demand_aggregated_{year}.parquet"
     dataset = mlflow.data.from_pandas(
         evaluation.training_frame, source=str(source), name=f"{question.key}_train_{year}"
     )

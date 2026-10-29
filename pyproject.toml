@@ -17,22 +17,24 @@ classifiers = [
 ]
 dependencies = [
     "huggingface-hub>=2.2.0",
-    "loguru",
+    "loguru>=0.7.3",
     "matplotlib>=3.11.2",
-    "mlflow>=2.11.0",
+    "mlflow>=3.17.1",
+    "numpy>=2.4.6",
     "pandas>=3.0.6",
-    "pip",
-    "pyarrow>=14.0.0",
-    "pytest",
-    "python-dotenv",
+    "pyarrow>=25.0.1",
+    "python-dotenv>=1.2.4",
     "requests>=2.34.2",
-    "ruff",
-    "seaborn>=0.13.2",
     "scikit-learn>=1.9.1",
-    "tqdm",
-    "typer",
+    "seaborn>=0.13.2",
 ]
 requires-python = "~=3.11.0"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
 
 
 [tool.ruff]

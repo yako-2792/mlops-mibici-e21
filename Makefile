@@ -2,9 +2,7 @@
 # GLOBALS                                                                       #
 #################################################################################
 
-PROJECT_NAME = mlops-mibici-e21
 PYTHON_VERSION = 3.11
-PYTHON_INTERPRETER = python
 ENV_MANAGER ?= uv
 MLFLOW_RUN = uv run mlflow run . --env-manager $(ENV_MANAGER)
 TRACKING_SETTING = $(shell uv run --quiet python -c "from mibici_e21.config import TRACKING_SETTINGS; print(TRACKING_SETTINGS.$(1))")

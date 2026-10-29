@@ -1,143 +1,227 @@
-"""Register the best candidate of each question in the MLflow Model Registry.
+"""Promote the best candidate of a question to production in the Model Registry.
 
-Run it through the MLflow Project: `mlflow run . -e register -P question=p1`.
+This is the `register` entry point of the MLflow Project:
 
-For each question the script picks the candidate run with the best validation metric,
-registers its model, describes it, records its lineage as version tags, sets the
-`champion` alias on that version, and checks that the model loads by name and alias.
-Aliases replace the stages of the registry, which MLflow deprecated.
+    mlflow run . -e register -P question=p1
+    mlflow run . -e register -P question=p1 -P run_id=<candidate run id>
 
-Importing this module points the tracking URI at `MODELING_SETTINGS.TRACKING_URI`.
+Lifecycle scheme: aliases, not stages. MLflow deprecated stages, and an alias is a movable
+pointer, so promoting or rolling back is one call and consumers keep loading the same URI.
+`champion` is the version in production and `challenger` the runner-up. A candidate is
+only promoted when it beats the latest baseline of its question on the selection metric.
 """
 
 import argparse
+from dataclasses import dataclass
 
 from loguru import logger
 import mlflow
 from mlflow import MlflowClient
+from mlflow.entities import Run
+from mlflow.entities.model_registry import ModelVersion
 import mlflow.pyfunc
 
-from mibici_e21.config import MODELING_SETTINGS
+from mibici_e21.config import TRACKING_SETTINGS
+from mibici_e21.modeling.base import BASELINE, Question
+from mibici_e21.modeling.questions import QUESTIONS
+from mibici_e21.modeling.runs import CANDIDATE
+from mibici_e21.tracking import base_tags, configure_tracking
 
-mlflow.set_tracking_uri(MODELING_SETTINGS.TRACKING_URI)
-
-REGISTRY = {
-    "p1": {
-        "name": "mibici-equipo21-p1-demanda",
-        "metric": "val_MAE",
-        "minimize": True,
-        "description": "P1: hourly bike departures per station. Regression model.",
-    },
-    "p2": {
-        "name": "mibici-equipo21-p2-riesgo",
-        "metric": "val_f1_macro",
-        "minimize": False,
-        "description": "P2: daily shortage or saturation risk per station. Classification model.",
-    },
-    "p3": {
-        "name": "mibici-equipo21-p3-grupos",
-        "metric": "silhouette",
-        "minimize": False,
-        "description": "P3: groups of stations by usage. Clustering model (scaler and KMeans).",
-    },
-}
+CHAMPION = "champion"
+CHALLENGER = "challenger"
 
 
-def select_best_run(client: MlflowClient, question: str):
-    """Return the candidate run of a question with the best selection metric.
+@dataclass(frozen=True)
+class Promotion:
+    """Outcome of a registration.
 
-    - `client`: MLflow client.
-    - `question`: `p1`, `p2`, or `p3`.
-
-    Only runs tagged `stage_of_work = candidate` that logged a model (`model_uri` tag) and
-    the selection metric are considered. Raises `ValueError` when there is none.
+    - `model_name`: registered model name.
+    - `champion`: version now behind the `champion` alias.
+    - `challenger`: version behind the `challenger` alias, if there is a runner-up.
     """
-    spec = REGISTRY[question]
-    experiment = client.get_experiment_by_name(MODELING_SETTINGS.EXPERIMENT_NAME)
-    if experiment is None:
-        raise ValueError(f"Experiment '{MODELING_SETTINGS.EXPERIMENT_NAME}' not found.")
 
-    runs = client.search_runs(
-        experiment_ids=[experiment.experiment_id],
-        filter_string=f"tags.question = '{question}' and tags.stage_of_work = 'candidate'",
-        max_results=1000,
-    )
-    runs = [
-        run for run in runs if spec["metric"] in run.data.metrics and "model_uri" in run.data.tags
+    model_name: str
+    champion: ModelVersion
+    challenger: ModelVersion | None
+
+
+def rank_candidates(
+    question: Question, baseline_value: float, candidate_values: dict[str, float]
+) -> list[str]:
+    """Return the run ids of the candidates that beat the baseline, best first.
+
+    - `question`: question whose selection metric is compared.
+    - `baseline_value`: selection metric of the baseline.
+    - `candidate_values`: candidate run id mapped to its selection metric.
+    """
+    beating = [
+        run_id
+        for run_id, value in candidate_values.items()
+        if question.is_better(value, baseline_value)
     ]
-    if not runs:
-        raise ValueError(f"No candidate run with a model and '{spec['metric']}' for {question}.")
+    return sorted(
+        beating,
+        key=lambda run_id: candidate_values[run_id],
+        reverse=question.greater_is_better,
+    )
 
-    pick = min if spec["minimize"] else max
-    return pick(runs, key=lambda run: run.data.metrics[spec["metric"]])
 
+def promote(question: Question, experiment_id: str, run_id: str | None = None) -> Promotion:
+    """Register the best candidate of a question and point `champion` at it.
 
-def register_question(question: str, run_id: str = "auto", alias: str = "champion") -> str:
-    """Register the model of one question and set its alias.
+    - `question`: question to promote.
+    - `experiment_id`: experiment that holds its runs.
+    - `run_id`: candidate to promote instead of the best one, for example a cheaper model
+      with a similar score. It must still beat the baseline.
 
-    - `question`: `p1`, `p2`, or `p3`.
-    - `run_id`: run to register, or `auto` to take the best candidate by the selection metric.
-      Raises `ValueError` when that run is of another question or logged no model.
-    - `alias`: alias to set on the new version. Defaults to `champion`.
-
-    The registered model gets a description. The new version gets a description and the tags
-    `source_run_id`, `experiment`, `git_commit`, `dataset_version`, `model_family`,
-    `selection_metric`, and `selection_value`, which give its lineage. Returns the version.
+    The runner-up, when there is one, gets `challenger`. Raises `ValueError` when no
+    candidate beats the baseline.
     """
-    spec = REGISTRY[question]
     client = MlflowClient()
-    run = select_best_run(client, question) if run_id == "auto" else client.get_run(run_id)
-    name = spec["name"]
-    if run.data.tags.get("question") != question:
-        raise ValueError(f"Run {run.info.run_id} is not a {question} run.")
-    if "model_uri" not in run.data.tags or spec["metric"] not in run.data.metrics:
-        raise ValueError(f"Run {run.info.run_id} has no model or no '{spec['metric']}'.")
-    value = run.data.metrics[spec["metric"]]
+    metric = question.selection_metric
+    baseline = _latest_baseline(client, experiment_id, question)
+    baseline_value = baseline.data.metrics[metric]
+    candidates = _candidate_runs(client, experiment_id, question)
+    ranked = rank_candidates(
+        question, baseline_value, {run.info.run_id: run.data.metrics[metric] for run in candidates}
+    )
+    if not ranked:
+        raise ValueError(
+            f"No {question.key} candidate beats the baseline {metric}={baseline_value:.4f}."
+        )
+    if run_id is not None:
+        if run_id not in ranked:
+            raise ValueError(
+                f"Run {run_id} is not a {question.key} candidate beating the baseline."
+            )
+        ranked.remove(run_id)
+        ranked.insert(0, run_id)
 
-    version = mlflow.register_model(run.data.tags["model_uri"], name)
-    client.update_registered_model(name, description=spec["description"])
+    runs = {run.info.run_id: run for run in candidates}
+    name = question.registered_model_name
+    _ensure_registered_model(client, question)
+    champion = _register_version(client, question, runs[ranked[0]], baseline)
+    client.set_registered_model_alias(name, CHAMPION, champion.version)
+
+    challenger = None
+    if len(ranked) > 1:
+        challenger = _register_version(client, question, runs[ranked[1]], baseline)
+        client.set_registered_model_alias(name, CHALLENGER, challenger.version)
+    else:
+        _delete_alias_if_set(client, name, CHALLENGER)
+
+    _check_serving(name)
+    return Promotion(model_name=name, champion=champion, challenger=challenger)
+
+
+def _latest_baseline(client: MlflowClient, experiment_id: str, question: Question) -> Run:
+    runs = _finished_runs(client, experiment_id, question, BASELINE)
+    if not runs:
+        raise ValueError(f"No finished {question.key} baseline. Train it before registering.")
+    return runs[0]
+
+
+def _candidate_runs(client: MlflowClient, experiment_id: str, question: Question) -> list[Run]:
+    return [
+        run
+        for run in _finished_runs(client, experiment_id, question, CANDIDATE)
+        if "model_uri" in run.data.tags and question.selection_metric in run.data.metrics
+    ]
+
+
+def _finished_runs(
+    client: MlflowClient, experiment_id: str, question: Question, stage: str
+) -> list[Run]:
+    """Return the finished runs of a question and stage, newest first."""
+    return client.search_runs(
+        experiment_ids=[experiment_id],
+        filter_string=(
+            f"tags.question = '{question.key}' and tags.stage_of_work = '{stage}' "
+            "and attributes.status = 'FINISHED'"
+        ),
+        order_by=["attributes.start_time DESC"],
+    )
+
+
+def _ensure_registered_model(client: MlflowClient, question: Question) -> None:
+    name = question.registered_model_name
+    if not client.search_registered_models(filter_string=f"name = '{name}'"):
+        client.create_registered_model(name)
+    client.update_registered_model(name, description=question.description)
+
+
+def _register_version(
+    client: MlflowClient, question: Question, run: Run, baseline: Run
+) -> ModelVersion:
+    """Register the model of a run, or reuse its version, and record its lineage as tags."""
+    name = question.registered_model_name
+    run_id = run.info.run_id
+    existing = client.search_model_versions(f"name = '{name}' and run_id = '{run_id}'")
+    version = existing[0] if existing else mlflow.register_model(run.data.tags["model_uri"], name)
+
+    metric = question.selection_metric
+    value = run.data.metrics[metric]
+    baseline_value = baseline.data.metrics[metric]
+    improvement = abs(value - baseline_value) / abs(baseline_value)
     client.update_model_version(
         name,
         version.version,
-        description=f"Run {run.info.run_name} ({run.info.run_id}). {spec['metric']}={value:.4f}.",
+        description=(
+            f"{run.info.run_name}: {metric}={value:.4f} against baseline {baseline_value:.4f} "
+            f"({improvement:.1%} better)."
+        ),
     )
     lineage = {
-        "source_run_id": run.info.run_id,
-        "experiment": MODELING_SETTINGS.EXPERIMENT_NAME,
-        "git_commit": run.data.tags.get("git_commit", "unknown"),
-        "dataset_version": run.data.params.get("dataset_version", "unknown"),
-        "model_family": run.data.tags.get("model_family", "unknown"),
-        "selection_metric": spec["metric"],
+        "experiment": TRACKING_SETTINGS.EXPERIMENT_NAME,
+        "source_run_id": run_id,
+        "source_run_name": run.info.run_name,
+        "git_commit": run.data.tags["git_commit"],
+        "dataset_revision": run.data.tags["dataset_revision"],
+        "model_family": run.data.tags["model_family"],
+        "selection_metric": metric,
         "selection_value": f"{value:.6f}",
+        "baseline_run_id": baseline.info.run_id,
+        "baseline_value": f"{baseline_value:.6f}",
     }
     for key, tag_value in lineage.items():
         client.set_model_version_tag(name, version.version, key, tag_value)
-    client.set_registered_model_alias(name, alias, version.version)
-
-    uri = f"models:/{name}@{alias}"
-    mlflow.pyfunc.load_model(uri)
-    logger.info(f"{uri} -> version {version.version} ({spec['metric']}={value:.4f}) loads fine")
-    return str(version.version)
+    return client.get_model_version(name, version.version)
 
 
-def main() -> None:
-    """Register from the command line, which is how the MLflow Project calls it.
+def _delete_alias_if_set(client: MlflowClient, name: str, alias: str) -> None:
+    if alias in client.get_registered_model(name).aliases:
+        client.delete_registered_model_alias(name, alias)
 
-    - `--question`: `p1`, `p2`, `p3`, or `all`.
-    - `--run_id`: run to register, or `auto` (default) for the best candidate.
-    - `--alias`: alias to set. Defaults to `champion`.
-    """
-    parser = argparse.ArgumentParser(description="Register the best MiBici models.")
-    parser.add_argument("--question", type=str, default="all", choices=["p1", "p2", "p3", "all"])
-    parser.add_argument("--run_id", type=str, default="auto")
-    parser.add_argument("--alias", type=str, default="champion")
-    args = parser.parse_args()
 
-    questions = list(REGISTRY) if args.question == "all" else [args.question]
-    if len(questions) > 1 and args.run_id != "auto":
-        raise ValueError("--run_id needs a single --question.")
-    for question in questions:
-        register_question(question, args.run_id, args.alias)
+def _check_serving(name: str) -> None:
+    """Load the champion by name and alias and score its own input example."""
+    uri = f"models:/{name}@{CHAMPION}"
+    model = mlflow.pyfunc.load_model(uri)
+    predictions = model.predict(model.input_example)
+    logger.info(f"{uri} loads and scores {len(predictions)} example rows")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Promote the best MiBici candidate.")
+    parser.add_argument("--question", required=True, choices=sorted(QUESTIONS))
+    parser.add_argument("--run_id", default="", help="Candidate to promote. Empty picks the best.")
+    args = parser.parse_args(argv)
+
+    question = QUESTIONS[args.question]
+    experiment_id = configure_tracking()
+    promotion = promote(question, experiment_id, args.run_id.strip() or None)
+
+    with mlflow.start_run(run_name=f"{question.key.upper()}_register"):
+        tags = {**base_tags("register"), "question": question.key}
+        tags["registered_model"] = promotion.model_name
+        tags["champion_version"] = promotion.champion.version
+        tags["champion_run_id"] = promotion.champion.run_id
+        mlflow.set_tags(tags)
+
+    challenger = promotion.challenger.version if promotion.challenger else "none"
+    logger.info(
+        f"{promotion.model_name}: champion v{promotion.champion.version}, challenger {challenger}"
+    )
 
 
 if __name__ == "__main__":

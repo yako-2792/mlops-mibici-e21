@@ -25,6 +25,6 @@ entry_points:
 
   register:
     parameters:
-      question: {type: str, default: "p1"}
-      run_id: {type: str, default: "auto"}
+      question: {type: string}
+      run_id: {type: string, default: ""}
     command: "python -m mibici_e21.modeling.register --question {question} --run_id {run_id}"

@@ -48,7 +48,7 @@ dev = [
 [tool.ruff]
 line-length = 99
 src = ["mibici_e21"]
-include = ["pyproject.toml", "mibici_e21/**/*.py"]
+include = ["pyproject.toml", "mibici_e21/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting

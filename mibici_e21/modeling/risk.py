@@ -71,6 +71,8 @@ class RiskQuestion(SupervisedQuestion):
         *LAG_FEATURES,
         *ROLLING_FEATURES,
     )
+    key_columns = (GoldColumns.STATION_ID, GoldColumns.DATE)
+    prediction_column = "predicted_risk"
     models: ClassVar[dict[str, ModelSpec]] = {
         BASELINE: ModelSpec(
             family="historical_mode",

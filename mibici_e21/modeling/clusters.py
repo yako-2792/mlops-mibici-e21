@@ -66,6 +66,8 @@ class ClusterQuestion(Question):
     selection_metric = "silhouette"
     greater_is_better = True
     feature_columns = (DEPARTURES, ARRIVALS, PEAK_DEPARTURES)
+    key_columns = (GoldColumns.STATION_ID,)
+    prediction_column = "predicted_group"
     models: ClassVar[dict[str, ModelSpec]] = {
         BASELINE: ModelSpec(
             family="kmeans",

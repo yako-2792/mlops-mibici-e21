@@ -135,16 +135,12 @@ MODELING_SETTINGS = ModelingSettings()
 # Predict config
 @dataclass(frozen=True)
 class PredictSettings:
-    """Settings for baseline inference output.
+    """Settings for batch inference.
 
-    - `P1_OUTPUT_DIR`: directory for P1 prediction files. Points at `data/processed`.
-    - `P2_OUTPUT_DIR`: directory for P2 prediction files. Points at `data/processed`.
-    - `P3_OUTPUT_DIR`: directory for P3 prediction files. Points at `data/processed`.
+    - `OUTPUT_DIR`: directory for the prediction files. Points at `data/processed`.
     """
 
-    P1_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
-    P2_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
-    P3_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
+    OUTPUT_DIR: Path = PROCESSED_DATA_DIR
 
 
 PREDICT_SETTINGS = PredictSettings()

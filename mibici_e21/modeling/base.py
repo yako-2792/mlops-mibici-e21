@@ -112,6 +112,8 @@ class Question(ABC):
     - `greater_is_better`: whether a higher `selection_metric` is better.
     - `models`: model name mapped to its `ModelSpec`. Must include `baseline`.
     - `feature_columns`: columns the estimator reads, in order.
+    - `key_columns`: columns that identify a row of the modeling frame in predictions.
+    - `prediction_column`: name of the prediction column in batch inference output.
     """
 
     key: str
@@ -122,6 +124,8 @@ class Question(ABC):
     greater_is_better: bool
     models: ClassVar[dict[str, ModelSpec]]
     feature_columns: tuple[str, ...]
+    key_columns: tuple[str, ...]
+    prediction_column: str
 
     @abstractmethod
     def prepare(self, gold: pd.DataFrame) -> pd.DataFrame:

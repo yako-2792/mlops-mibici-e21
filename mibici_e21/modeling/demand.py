@@ -47,6 +47,8 @@ class DemandQuestion(SupervisedQuestion):
         GoldColumns.DAY_OF_WEEK,
         GoldColumns.IS_WEEKEND,
     )
+    key_columns = (GoldColumns.STATION_ID, GoldColumns.DATE, GoldColumns.HOUR)
+    prediction_column = "predicted_departures"
     models: ClassVar[dict[str, ModelSpec]] = {
         BASELINE: ModelSpec(
             family="historical_mean",

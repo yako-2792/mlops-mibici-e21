@@ -29,36 +29,40 @@ def load_silver_trips(
     return pd.read_parquet(input_path, engine="pyarrow")
 
 
+def _trip_duration_minutes(trips: pd.DataFrame) -> pd.Series:
+    """Return each trip's end time minus its start time, in minutes."""
+    start = pd.to_datetime(trips[TripColumns.START_TIME])
+    end = pd.to_datetime(trips[TripColumns.END_TIME])
+    return (end - start).dt.total_seconds() / 60.0
+
+
+def _is_weekend(day_of_week: pd.Series) -> pd.Series:
+    """Return 1 on Saturday and Sunday and 0 otherwise, with Monday as day 0."""
+    return (day_of_week >= 5).astype(int)
+
+
 def _extract_trip_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add hour, weekday, weekend, and duration, and keep the feature columns.
+    """Return the start and end times, both station ids, and the trip features.
 
-    `day_of_week` uses Monday as 0. `is_weekend` is 1 on Saturday and Sunday.
-    The returned frame keeps the start and end times, both station ids, and
-    the four new columns.
+    The features are `hour`, `day_of_week` (Monday is 0), `is_weekend`, and
+    `duration_minutes`. The input frame is left unchanged.
     """
-    df[TripColumns.START_TIME] = pd.to_datetime(df[TripColumns.START_TIME])
-    df[TripColumns.END_TIME] = pd.to_datetime(df[TripColumns.END_TIME])
-
-    df[GoldColumns.HOUR] = df[TripColumns.START_TIME].dt.hour
-    df[GoldColumns.DAY_OF_WEEK] = df[TripColumns.START_TIME].dt.dayofweek
-    df[GoldColumns.IS_WEEKEND] = (df[GoldColumns.DAY_OF_WEEK] >= 5).astype(int)
-    df[GoldColumns.DURATION_MINUTES] = (
-        df[TripColumns.END_TIME] - df[TripColumns.START_TIME]
-    ).dt.total_seconds() / 60.0
-
-    features_cols = [
-        TripColumns.START_TIME,
-        TripColumns.END_TIME,
-        TripColumns.ORIGIN_ID,
-        TripColumns.DESTINATION_ID,
-        GoldColumns.HOUR,
-        GoldColumns.DAY_OF_WEEK,
-        GoldColumns.IS_WEEKEND,
-        GoldColumns.DURATION_MINUTES,
-    ]
-    present_cols = [col for col in features_cols if col in df.columns]
-    logger.info(f"Extracted trip features for {len(df)} rows")
-    return df[present_cols].copy()
+    start = pd.to_datetime(df[TripColumns.START_TIME])
+    day_of_week = start.dt.dayofweek
+    features = pd.DataFrame(
+        {
+            TripColumns.START_TIME: start,
+            TripColumns.END_TIME: pd.to_datetime(df[TripColumns.END_TIME]),
+            TripColumns.ORIGIN_ID: df[TripColumns.ORIGIN_ID],
+            TripColumns.DESTINATION_ID: df[TripColumns.DESTINATION_ID],
+            GoldColumns.HOUR: start.dt.hour,
+            GoldColumns.DAY_OF_WEEK: day_of_week,
+            GoldColumns.IS_WEEKEND: _is_weekend(day_of_week),
+            GoldColumns.DURATION_MINUTES: _trip_duration_minutes(df),
+        }
+    )
+    logger.info(f"Extracted trip features for {len(features)} rows")
+    return features
 
 
 def _aggregate_station_demand(df: pd.DataFrame) -> pd.DataFrame:
@@ -100,7 +104,7 @@ def _aggregate_station_demand(df: pd.DataFrame) -> pd.DataFrame:
 
     demand_date = pd.to_datetime(df_demand[GoldColumns.DATE])
     df_demand[GoldColumns.DAY_OF_WEEK] = demand_date.dt.dayofweek
-    df_demand[GoldColumns.IS_WEEKEND] = (df_demand[GoldColumns.DAY_OF_WEEK] >= 5).astype(int)
+    df_demand[GoldColumns.IS_WEEKEND] = _is_weekend(df_demand[GoldColumns.DAY_OF_WEEK])
 
     logger.info(f"Aggregated station demand into {len(df_demand)} rows")
     return df_demand
@@ -119,9 +123,7 @@ def _clean_and_filter_trips(df: pd.DataFrame) -> pd.DataFrame:
     dropped_nulls = len(df) - len(df_clean)
     logger.info(f"Dropped {dropped_nulls} rows with null stations or times")
 
-    start_dt = pd.to_datetime(df_clean[TripColumns.START_TIME])
-    end_dt = pd.to_datetime(df_clean[TripColumns.END_TIME])
-    duration_min = (end_dt - start_dt).dt.total_seconds() / 60.0
+    duration_min = _trip_duration_minutes(df_clean)
     valid_duration = (duration_min > FEATURE_STORE_SETTINGS.MIN_TRIP_DURATION_MINUTES) & (
         duration_min <= FEATURE_STORE_SETTINGS.MAX_TRIP_DURATION_MINUTES
     )

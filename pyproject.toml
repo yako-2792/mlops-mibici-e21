@@ -30,6 +30,14 @@ dependencies = [
 ]
 requires-python = "~=3.11.0"
 
+[tool.uv]
+# The code runs from the project root, so uv installs only the locked dependencies.
+# This also lets `mlflow run --env-manager uv` rebuild the environment from uv.lock alone.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

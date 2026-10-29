@@ -803,7 +803,7 @@ wheels = [
 [[package]]
 name = "mibici-e21"
 version = "0.0.1"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "loguru" },

@@ -6,24 +6,22 @@ from loguru import logger
 import pandas as pd
 
 from mibici_e21.config import DATA_LAKE_SETTINGS, FEATURE_STORE_SETTINGS
-from mibici_e21.schemas.columns import GoldColumns, TripColumns
+from mibici_e21.schemas.columns import GoldColumns, StationColumns, TripColumns
 
 
 def load_silver_trips(
     year: int,
-    processed_dir: Path | None = None,
+    silver_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Load `mibici-trips-{year}.parquet` from the data lake.
 
     - `year`: trip year used in the file name.
-    - `processed_dir`: directory that holds the silver Parquet files. Defaults to
-      `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    - `silver_dir`: directory that holds the silver Parquet files. Defaults to
+      `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
 
     Raises `FileNotFoundError` when that file is not in the directory.
     """
-    if processed_dir is None:
-        processed_dir = DATA_LAKE_SETTINGS.PROCESSED_DIR
-    input_path = processed_dir / f"mibici-trips-{year}.parquet"
+    input_path = (silver_dir or DATA_LAKE_SETTINGS.SILVER_DIR) / f"mibici-trips-{year}.parquet"
     if not input_path.exists():
         raise FileNotFoundError(f"Parquet file for trips not found for year {year}: {input_path}")
 
@@ -31,36 +29,40 @@ def load_silver_trips(
     return pd.read_parquet(input_path, engine="pyarrow")
 
 
+def _trip_duration_minutes(trips: pd.DataFrame) -> pd.Series:
+    """Return each trip's end time minus its start time, in minutes."""
+    start = pd.to_datetime(trips[TripColumns.START_TIME])
+    end = pd.to_datetime(trips[TripColumns.END_TIME])
+    return (end - start).dt.total_seconds() / 60.0
+
+
+def _is_weekend(day_of_week: pd.Series) -> pd.Series:
+    """Return 1 on Saturday and Sunday and 0 otherwise, with Monday as day 0."""
+    return (day_of_week >= 5).astype(int)
+
+
 def _extract_trip_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add hour, weekday, weekend, and duration, and keep the feature columns.
+    """Return the start and end times, both station ids, and the trip features.
 
-    `day_of_week` uses Monday as 0. `is_weekend` is 1 on Saturday and Sunday.
-    The returned frame keeps the start and end times, both station ids, and
-    the four new columns.
+    The features are `hour`, `day_of_week` (Monday is 0), `is_weekend`, and
+    `duration_minutes`. The input frame is left unchanged.
     """
-    df[TripColumns.START_TIME] = pd.to_datetime(df[TripColumns.START_TIME])
-    df[TripColumns.END_TIME] = pd.to_datetime(df[TripColumns.END_TIME])
-
-    df[GoldColumns.HOUR] = df[TripColumns.START_TIME].dt.hour
-    df[GoldColumns.DAY_OF_WEEK] = df[TripColumns.START_TIME].dt.dayofweek
-    df[GoldColumns.IS_WEEKEND] = (df[GoldColumns.DAY_OF_WEEK] >= 5).astype(int)
-    df[GoldColumns.DURATION_MINUTES] = (
-        df[TripColumns.END_TIME] - df[TripColumns.START_TIME]
-    ).dt.total_seconds() / 60.0
-
-    features_cols = [
-        TripColumns.START_TIME,
-        TripColumns.END_TIME,
-        TripColumns.ORIGIN_ID,
-        TripColumns.DESTINATION_ID,
-        GoldColumns.HOUR,
-        GoldColumns.DAY_OF_WEEK,
-        GoldColumns.IS_WEEKEND,
-        GoldColumns.DURATION_MINUTES,
-    ]
-    present_cols = [col for col in features_cols if col in df.columns]
-    logger.info(f"Extracted trip features for {len(df)} rows")
-    return df[present_cols].copy()
+    start = pd.to_datetime(df[TripColumns.START_TIME])
+    day_of_week = start.dt.dayofweek
+    features = pd.DataFrame(
+        {
+            TripColumns.START_TIME: start,
+            TripColumns.END_TIME: pd.to_datetime(df[TripColumns.END_TIME]),
+            TripColumns.ORIGIN_ID: df[TripColumns.ORIGIN_ID],
+            TripColumns.DESTINATION_ID: df[TripColumns.DESTINATION_ID],
+            GoldColumns.HOUR: start.dt.hour,
+            GoldColumns.DAY_OF_WEEK: day_of_week,
+            GoldColumns.IS_WEEKEND: _is_weekend(day_of_week),
+            GoldColumns.DURATION_MINUTES: _trip_duration_minutes(df),
+        }
+    )
+    logger.info(f"Extracted trip features for {len(features)} rows")
+    return features
 
 
 def _aggregate_station_demand(df: pd.DataFrame) -> pd.DataFrame:
@@ -102,7 +104,7 @@ def _aggregate_station_demand(df: pd.DataFrame) -> pd.DataFrame:
 
     demand_date = pd.to_datetime(df_demand[GoldColumns.DATE])
     df_demand[GoldColumns.DAY_OF_WEEK] = demand_date.dt.dayofweek
-    df_demand[GoldColumns.IS_WEEKEND] = (df_demand[GoldColumns.DAY_OF_WEEK] >= 5).astype(int)
+    df_demand[GoldColumns.IS_WEEKEND] = _is_weekend(df_demand[GoldColumns.DAY_OF_WEEK])
 
     logger.info(f"Aggregated station demand into {len(df_demand)} rows")
     return df_demand
@@ -121,9 +123,7 @@ def _clean_and_filter_trips(df: pd.DataFrame) -> pd.DataFrame:
     dropped_nulls = len(df) - len(df_clean)
     logger.info(f"Dropped {dropped_nulls} rows with null stations or times")
 
-    start_dt = pd.to_datetime(df_clean[TripColumns.START_TIME])
-    end_dt = pd.to_datetime(df_clean[TripColumns.END_TIME])
-    duration_min = (end_dt - start_dt).dt.total_seconds() / 60.0
+    duration_min = _trip_duration_minutes(df_clean)
     valid_duration = (duration_min > FEATURE_STORE_SETTINGS.MIN_TRIP_DURATION_MINUTES) & (
         duration_min <= FEATURE_STORE_SETTINGS.MAX_TRIP_DURATION_MINUTES
     )
@@ -134,15 +134,15 @@ def _clean_and_filter_trips(df: pd.DataFrame) -> pd.DataFrame:
 
 def materialize_yearly_trip_features(
     year: int,
-    processed_dir: Path = FEATURE_STORE_SETTINGS.PROCESSED_DIR,
+    gold_dir: Path = FEATURE_STORE_SETTINGS.GOLD_DIR,
 ) -> tuple[Path, Path]:
     """Write `features_{year}.parquet` and `demand_aggregated_{year}.parquet`.
 
     - `year`: trip year to read and to use in the output names.
-    - `processed_dir`: directory for the written files. Defaults to
-      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+    - `gold_dir`: directory for the written files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
 
-    Silver trips are read from `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    Silver trips are read from `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
     Returns the path of the trip-feature file and the path of the demand file.
     """
     df_silver = load_silver_trips(year)
@@ -150,8 +150,8 @@ def materialize_yearly_trip_features(
     df_features = _extract_trip_features(df_clean)
     df_demand = _aggregate_station_demand(df_clean)
 
-    output_features = processed_dir / f"features_{year}.parquet"
-    output_demand = processed_dir / f"demand_aggregated_{year}.parquet"
+    output_features = gold_dir / f"features_{year}.parquet"
+    output_demand = gold_dir / f"demand_aggregated_{year}.parquet"
     df_features.to_parquet(output_features, index=False, engine="pyarrow")
     df_demand.to_parquet(output_demand, index=False, engine="pyarrow")
 
@@ -160,19 +160,57 @@ def materialize_yearly_trip_features(
     return output_features, output_demand
 
 
+def load_gold_demand(year: int, gold_dir: Path | None = None) -> pd.DataFrame:
+    """Load `demand_aggregated_{year}.parquet` with `date` parsed to datetime.
+
+    - `year`: demand year used in the file name.
+    - `gold_dir`: directory of the gold files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
+
+    Raises `FileNotFoundError` when the file is missing.
+    """
+    directory = gold_dir or FEATURE_STORE_SETTINGS.GOLD_DIR
+    demand_path = directory / f"demand_aggregated_{year}.parquet"
+    if not demand_path.exists():
+        raise FileNotFoundError(
+            f"No gold demand for {year} at {demand_path}. Run `mlflow run . -e ingest` first."
+        )
+
+    logger.info(f"Loading gold demand for {year} from {demand_path}")
+    demand = pd.read_parquet(demand_path, engine="pyarrow")
+    demand[GoldColumns.DATE] = pd.to_datetime(demand[GoldColumns.DATE])
+    return demand
+
+
+def load_station_locations(silver_dir: Path | None = None) -> pd.DataFrame:
+    """Load the id, latitude, and longitude of every station from the station catalog.
+
+    - `silver_dir`: directory of the silver files. Defaults to `DATA_LAKE_SETTINGS.SILVER_DIR`.
+
+    The id column is renamed to `station_id`, to join with the gold demand. Raises
+    `FileNotFoundError` when the catalog is missing.
+    """
+    path = (silver_dir or DATA_LAKE_SETTINGS.SILVER_DIR) / "mibici-stations.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"No station catalog at {path}. Run `mlflow run . -e ingest`.")
+    columns = [StationColumns.ID, StationColumns.LATITUDE, StationColumns.LONGITUDE]
+    stations = pd.read_parquet(path, columns=columns, engine="pyarrow")
+    return stations.rename(columns={StationColumns.ID: GoldColumns.STATION_ID})
+
+
 def materialize_features_range(
     start_year: int,
     end_year: int,
-    processed_dir: Path = FEATURE_STORE_SETTINGS.PROCESSED_DIR,
+    gold_dir: Path = FEATURE_STORE_SETTINGS.GOLD_DIR,
 ) -> list[tuple[Path, Path]]:
     """Write trip features and station demand for each year in the range.
 
     - `start_year`: first year to read. It is included.
     - `end_year`: last year to read. It is included.
-    - `processed_dir`: directory for the written files. Defaults to
-      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+    - `gold_dir`: directory for the written files. Defaults to
+      `FEATURE_STORE_SETTINGS.GOLD_DIR` (`data/processed`).
 
-    Silver trips are read from `DATA_LAKE_SETTINGS.PROCESSED_DIR` (`data/raw`).
+    Silver trips are read from `DATA_LAKE_SETTINGS.SILVER_DIR` (`data/raw`).
 
     Each year is handled like `materialize_yearly_trip_features`. A missing year raises
     `FileNotFoundError`. Returns one `(features path, demand path)` pair per year.
@@ -180,7 +218,7 @@ def materialize_features_range(
     logger.info(f"Materializing features for {start_year}-{end_year}")
     generated_files = []
     for year in range(start_year, end_year + 1):
-        paths = materialize_yearly_trip_features(year, processed_dir=processed_dir)
+        paths = materialize_yearly_trip_features(year, gold_dir=gold_dir)
         generated_files.append(paths)
     logger.info(f"Feature range complete: {len(generated_files)} years")
     return generated_files

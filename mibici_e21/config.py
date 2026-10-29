@@ -1,6 +1,7 @@
-"""Paths and settings for the MiBici data lake, features, and models.
+"""Paths and settings for the MiBici data lake, features, tracking, and models.
 
-`load_dotenv` runs on import so `HF_TOKEN` is available from a `.env` file.
+`load_dotenv` runs on import, so `HF_TOKEN` and the MLflow variables can live in a `.env`
+file. `huggingface_hub` reads `HF_TOKEN` from the environment when it uploads.
 """
 
 from dataclasses import dataclass
@@ -9,10 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file if it exists
 load_dotenv()
 
-# Project paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJ_ROOT / "data"
@@ -35,18 +34,17 @@ class DataLakeSettings:
 
     - `MIBICI_BASE_URL`: base URL of the public MiBici file directory.
     - `HF_DATASET_REPO`: Hugging Face dataset repository, as `owner/name`.
-    - `TEMP_DIR`: local directory for temporary downloads.
-    - `RAW_DIR`: local directory for raw files.
-    - `HF_TOKEN`: Hugging Face token, read from the `HF_TOKEN` environment variable.
-    - `PROCESSED_DIR`: data lake output for the yearly Parquet files. Points at `data/raw`.
+    - `HF_DATASET_REVISION`: dataset commit the ingestion downloads, so every clone trains on
+      the same files. Update it on purpose to train on a newer snapshot.
+    - `TEMP_DIR`: bronze layer, the downloaded CSVs (`data/temp`).
+    - `SILVER_DIR`: silver layer, the yearly trip and station Parquet files (`data/raw`).
     """
 
     MIBICI_BASE_URL: str = "https://www.mibici.net/site/assets/files/"
     HF_DATASET_REPO: str = "yako2792/mibici-dataset"
+    HF_DATASET_REVISION: str = "11e35bd665983aad17d70b921ccf5c5218294c9d"
     TEMP_DIR: Path = TEMP_DATA_DIR
-    RAW_DIR: Path = RAW_DATA_DIR
-    HF_TOKEN: str | None = os.getenv("HF_TOKEN")
-    PROCESSED_DIR: Path = RAW_DATA_DIR
+    SILVER_DIR: Path = RAW_DATA_DIR
 
 
 DATA_LAKE_SETTINGS = DataLakeSettings()
@@ -59,58 +57,101 @@ class FeatureStoreSettings:
 
     - `MAX_TRIP_DURATION_MINUTES`: maximum trip duration in minutes. Defaults to 8 hours.
     - `MIN_TRIP_DURATION_MINUTES`: minimum trip duration in minutes. Defaults to 0 minutes.
-    - `PROCESSED_DIR`: directory for gold feature Parquet files. Points at `data/processed`.
+    - `GOLD_DIR`: gold layer, the trip features, station demand, and data manifests
+      (`data/processed`).
     """
 
     MAX_TRIP_DURATION_MINUTES: float = 480.0
     MIN_TRIP_DURATION_MINUTES: float = 0.0
-    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+    GOLD_DIR: Path = PROCESSED_DATA_DIR
 
 
 FEATURE_STORE_SETTINGS = FeatureStoreSettings()
 
 
+# Tracking config
+@dataclass(frozen=True)
+class TrackingSettings:
+    """Settings for the MLflow tracking server.
+
+    - `TRACKING_URI`: MLflow tracking server, read from `MLFLOW_TRACKING_URI`. An empty
+      variable counts as unset, so it never falls back to a local file store.
+    - `EXPERIMENT_NAME`: experiment that holds every ingestion, baseline, search, and
+      candidate run. `mlflow run` reads it from `MLFLOW_EXPERIMENT_NAME`, so both must match.
+    - `TEAM`: team number recorded in the `team` tag.
+    """
+
+    TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5000"
+    EXPERIMENT_NAME: str = "mibici-equipo21"
+    TEAM: str = "21"
+
+
+TRACKING_SETTINGS = TrackingSettings()
+
+
 # Modeling config
 @dataclass(frozen=True)
 class ModelingSettings:
-    """Settings for baseline training.
+    """Settings shared by every baseline, search, and candidate run.
 
-    - `SEED`: random seed for sampling and KMeans.
-    - `EXPERIMENT_NAME`: MLflow experiment that holds the baseline runs.
-    - `TEST_SPLIT_DATE`: first date of the test set, as `YYYY-MM-DD`.
+    - `SEED`: random seed of every estimator and sample.
+    - `TRAINING_YEAR`: year that `ingest` downloads and every model trains on.
+    - `VAL_START_MONTH`: first month of the validation set. Earlier months are training.
+    - `TEST_START_MONTH`: first month of the test set. Validation ends the month before.
     - `BALANCE_THRESHOLD`: absolute daily balance that marks a station as
       `possible_empty` or `possible_full`.
-    - `PICO_HOURS`: hours counted as peak departures.
-    - `KMEANS_CLUSTERS`: number of station clusters.
-    - `PROCESSED_DIR`: directory for gold demand Parquet files. Points at
-      `data/processed`.
+    - `PEAK_HOURS`: hours counted as peak departures.
+    - `RISK_LAGS`: days back used for the P2 lag features.
+    - `BASELINE_CLUSTERS`: number of station groups of the P3 baseline.
+    - `KMEANS_N_INIT`: KMeans restarts per fit.
+    - `SEARCH_N_ESTIMATORS`, `SEARCH_MAX_DEPTH`: grid of the P1 and P2 searches.
+    - `SEARCH_N_CLUSTERS`: values of `k` tried by the P3 search.
+    - `PLOT_SAMPLE_SIZE`: points drawn in scatter plots.
     """
 
     SEED: int = 42
-    EXPERIMENT_NAME: str = "MiBici_Baselines_Equipo21"
-    TEST_SPLIT_DATE: str = "2023-10-01"
+    TRAINING_YEAR: int = 2023
+    VAL_START_MONTH: int = 8
+    TEST_START_MONTH: int = 10
     BALANCE_THRESHOLD: int = 5
-    PICO_HOURS: tuple[int, ...] = (7, 8, 9, 17, 18, 19)
-    KMEANS_CLUSTERS: int = 3
-    PROCESSED_DIR: Path = PROCESSED_DATA_DIR
+    PEAK_HOURS: tuple[int, ...] = (7, 8, 9, 17, 18, 19)
+    RISK_LAGS: tuple[int, ...] = (1, 7)
+    BASELINE_CLUSTERS: int = 3
+    KMEANS_N_INIT: int = 10
+    SEARCH_N_ESTIMATORS: tuple[int, ...] = (100, 200, 400)
+    SEARCH_MAX_DEPTH: tuple[int, ...] = (8, 14, 20)
+    SEARCH_N_CLUSTERS: tuple[int, ...] = (2, 3, 4, 5, 6)
+    PLOT_SAMPLE_SIZE: int = 2000
 
 
 MODELING_SETTINGS = ModelingSettings()
 
 
+# Registry config
+@dataclass(frozen=True)
+class RegistrySettings:
+    """Aliases of the Model Registry lifecycle.
+
+    - `CHAMPION_ALIAS`: version in production, the one batch inference loads.
+    - `CHALLENGER_ALIAS`: runner-up version, kept ready to compare or swap in.
+    """
+
+    CHAMPION_ALIAS: str = "champion"
+    CHALLENGER_ALIAS: str = "challenger"
+
+
+REGISTRY_SETTINGS = RegistrySettings()
+
+
 # Predict config
 @dataclass(frozen=True)
 class PredictSettings:
-    """Settings for baseline inference output.
+    """Settings for batch inference.
 
-    - `P1_OUTPUT_DIR`: directory for P1 prediction files. Points at `data/processed`.
-    - `P2_OUTPUT_DIR`: directory for P2 prediction files. Points at `data/processed`.
-    - `P3_OUTPUT_DIR`: directory for P3 prediction files. Points at `data/processed`.
+    - `OUTPUT_DIR`: directory for the prediction files. Points at `data/processed`.
     """
 
-    P1_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
-    P2_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
-    P3_OUTPUT_DIR: Path = PROCESSED_DATA_DIR
+    OUTPUT_DIR: Path = PROCESSED_DATA_DIR
 
 
 PREDICT_SETTINGS = PredictSettings()

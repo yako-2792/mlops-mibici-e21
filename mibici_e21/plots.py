@@ -1,56 +1,74 @@
-import pandas as pd
+"""Exploratory figures of one year of gold data, written to `reports/figures`.
+
+python -m mibici_e21.plots --year 2023
+"""
+
+import argparse
+
 import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pathlib import Path
+
+matplotlib.use("Agg")
+
 from loguru import logger
-from mibici_e21.config import FEATURE_STORE_SETTINGS, FIGURES_DIR
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+from mibici_e21.config import FEATURE_STORE_SETTINGS, FIGURES_DIR, MODELING_SETTINGS
 from mibici_e21.schemas.columns import GoldColumns, TripColumns
 
-def main():
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+TOP_STATIONS = 10
+
+
+def plot_mean_departures_by_hour(demand: pd.DataFrame) -> plt.Figure:
+    by_hour = demand.groupby(GoldColumns.HOUR)[GoldColumns.DEPARTURES_COUNT].mean().reset_index()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=by_hour, x=GoldColumns.HOUR, y=GoldColumns.DEPARTURES_COUNT, ax=ax)
+    ax.set(title="Mean departures per station by hour", xlabel="Hour", ylabel="Departures")
+    return fig
+
+
+def plot_trips_by_weekday(trips: pd.DataFrame) -> plt.Figure:
+    counts = trips[GoldColumns.DAY_OF_WEEK].value_counts().sort_index()
+    fig, ax = plt.subplots(figsize=(8, 5))
+    sns.barplot(x=[WEEKDAYS[day] for day in counts.index], y=counts.to_numpy(), ax=ax)
+    ax.set(title="Trips by weekday", ylabel="Trips")
+    return fig
+
+
+def plot_busiest_stations(trips: pd.DataFrame) -> plt.Figure:
+    top = trips[TripColumns.ORIGIN_ID].value_counts().head(TOP_STATIONS)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(x=top.index.astype(str), y=top.to_numpy(), order=top.index.astype(str), ax=ax)
+    ax.set(title=f"Top {TOP_STATIONS} origin stations", xlabel="Station id", ylabel="Trips")
+    return fig
+
+
+def write_figures(year: int) -> None:
+    """Write the exploratory figures of a year as PNG files in `reports/figures`."""
+    directory = FEATURE_STORE_SETTINGS.GOLD_DIR
+    demand = pd.read_parquet(directory / f"demand_aggregated_{year}.parquet")
+    trips = pd.read_parquet(directory / f"features_{year}.parquet")
+    figures = {
+        f"departures_by_hour_{year}.png": plot_mean_departures_by_hour(demand),
+        f"trips_by_weekday_{year}.png": plot_trips_by_weekday(trips),
+        f"busiest_stations_{year}.png": plot_busiest_stations(trips),
+    }
+
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    
-    logger.info("Cargando datos para las gráficas/artefactos ")
-    df_demanda = pd.read_parquet(FEATURE_STORE_SETTINGS.PROCESSED_DIR / "demand_aggregated_2024.parquet", engine="pyarrow")
-    df_features = pd.read_parquet(FEATURE_STORE_SETTINGS.PROCESSED_DIR / "features_2024.parquet", engine="pyarrow")
-    
-    #Artefacto 1 
-    logger.info("Generando gráfica para P1")
-    plt.figure(figsize=(10, 6))
-    demanda_hora = df_demanda.groupby(GoldColumns.HOUR)[GoldColumns.DEPARTURES_COUNT].mean().reset_index()
-    sns.barplot(data=demanda_hora, x=GoldColumns.HOUR, y=GoldColumns.DEPARTURES_COUNT, color="#6D94D3")
-    plt.title('Promedio de Viajes por Hora')
-    plt.xlabel('Hora')
-    plt.ylabel('Promedio de Viajes')
-    plt.savefig(FIGURES_DIR / "demanda_hora.png")
-    plt.close()
-    
-    #Artefacto 2 
-    logger.info("Generando gráfica para P2")
-    plt.figure(figsize=(8, 5))
-    dias = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']
-    # Contamos cuántos viajes hay por día 
-    viajes_dia = df_features[GoldColumns.DAY_OF_WEEK].value_counts().sort_index()
-    sns.barplot(x=dias, y=viajes_dia.values, color="#7CDBD3")
-    plt.title('Total de Viajes por Semana')
-    plt.ylabel('Total de Viajes')
-    plt.savefig(FIGURES_DIR / "total_dias.png")
-    plt.close()
-    
-    #Artefacto 3 
-    logger.info("Generando gráfica para P3")
-    plt.figure(figsize=(10, 6))
-    # Sacamos las 10 estaciones con más tráfico 
-    top_estaciones = df_features[TripColumns.ORIGIN_ID].value_counts().head(10)
-    sns.barplot(x=top_estaciones.index.astype(str), y=top_estaciones.values, color="#E2555A")
-    plt.title('Top 10 Estaciones con Más Tráfico')
-    plt.xlabel('ID de Estación')
-    plt.ylabel('Total de Viajes')
-    plt.savefig(FIGURES_DIR / "top_estaciones.png")
-    plt.close()
-    
-    logger.success("Gráficas guardadas")
+    for name, figure in figures.items():
+        figure.tight_layout()
+        figure.savefig(FIGURES_DIR / name)
+        plt.close(figure)
+        logger.info(f"Wrote {FIGURES_DIR / name}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Write exploratory figures of one year.")
+    parser.add_argument("--year", type=int, default=MODELING_SETTINGS.TRAINING_YEAR)
+    write_figures(parser.parse_args(argv).year)
+
 
 if __name__ == "__main__":
     main()

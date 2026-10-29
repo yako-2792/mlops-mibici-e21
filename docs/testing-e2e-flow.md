@@ -1,71 +1,61 @@
-# Testing e2e flow
+# Testing the end-to-end flow
 
-Run these four commands in order, from the project root. They download the published Parquet files, build gold features for 2023 and 2024, train the baselines on 2023, and score 2024.
+These steps go from a clean clone to batch predictions served by the production models. Run them from the project root, in the order shown.
+
+## 1. Start the tracking server
+
+In a dedicated terminal:
+
+```bash
+make mlflow-server
+```
+
+The server stores runs and the Model Registry in `mlflow.db` and artifacts in `mlartifacts/`. Both are gitignored.
+
+## 2. Point the shell at it
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_EXPERIMENT_NAME=mibici-equipo21
+```
+
+`mlflow run` creates its run in `MLFLOW_EXPERIMENT_NAME` before the code starts. Without the export, the run lands in `Default` and the code stops with a message that names the export.
+
+## 3. Ingest the training year
+
+```bash
+mlflow run . -e ingest --env-manager uv
+```
+
+Expect `data/raw/mibici-trips-2023.parquet`, `data/raw/mibici-stations.parquet`, the two gold files in `data/processed/`, and `data/processed/data_manifest_2023.json`. The run `ingest_2023` logs the manifest under `data/`.
+
+## 4. Train a baseline and a candidate
+
+```bash
+mlflow run . -e train -P question=p1 -P model=baseline --env-manager uv
+mlflow run . -e train -P question=p1 -P model=hgb -P n_estimators=400 -P max_depth=14 --env-manager uv
+```
+
+Each command logs one run named after its model and hyperparameters, with `plots/`, `data/`, `config/`, and the model with its signature. A candidate without its hyperparameters stops with the `-P` flags it needs.
+
+## 5. Promote the champion
+
+```bash
+mlflow run . -e register -P question=p1 --env-manager uv
+```
+
+The log ends with `models:/mibici-equipo21-p1-demanda@champion loads and scores 5 example rows`. Registration stops when no candidate beats the baseline on the validation metric.
+
+Repeat steps 4 and 5 with `question=p2` and `question=p3`. The README lists the commands that reproduce the chosen model of each question.
+
+## 6. Score a later year
+
+Prediction reads the gold files of the year it scores, so build them first:
 
 ```bash
 make download-data
-make materialize-features-range START=2023 END=2024
-make train YEAR=2023
+make materialize-yearly-features YEAR=2024
 make predict YEAR=2024 SAVE_CSV=true
 ```
 
-The model is fit on 2023 and applied to 2024. P1 and P2 reuse the 2023 station-hour means and station classes. A station-hour pair that was not in training falls back to the global mean or the global class.
-
-## 1. Download the silver files
-
-```bash
-make download-data
-```
-
-Copies every `*.parquet` file from the Hugging Face dataset `yako2792/mibici-dataset` into `data/raw/`, and writes `data/raw/data-version.txt` with the dataset commit.
-
-Expect `data/raw/mibici-trips-2023.parquet` and `data/raw/mibici-trips-2024.parquet`. The log ends with `Dataset download complete`.
-
-## 2. Build gold features
-
-```bash
-make materialize-features-range START=2023 END=2024
-```
-
-Reads each yearly trip file from `data/raw/` and writes trip features and station demand into `data/processed/`. Both years are included. A missing year stops the command.
-
-Expect these files:
-
-- `data/processed/features_2023.parquet`
-- `data/processed/demand_aggregated_2023.parquet`
-- `data/processed/features_2024.parquet`
-- `data/processed/demand_aggregated_2024.parquet`
-
-The log ends with `Feature range complete: 2 years`.
-
-## 3. Train the baselines
-
-```bash
-make train YEAR=2023
-```
-
-Reads `demand_aggregated_2023.parquet` and logs one MLflow run per baseline under `mlruns/`, in the experiment `MiBici_Baselines_Equipo21`.
-
-Expect three finished runs:
-
-- `P1_Historical_Mean`, with MAE, RMSE, and R²
-- `P2_Historical_Mode`, with macro precision, recall, and F1
-- `P3_KMeans_3_Clusters`, with the silhouette score
-
-Each run also stores its figure and its model artifact (`p1_model.parquet`, `p2_model.parquet`, or `p3_pipeline.pkl`). The log ends with `Baseline training complete for 2023`.
-
-## 4. Score a later year
-
-```bash
-make predict YEAR=2024 SAVE_CSV=true
-```
-
-Reads `demand_aggregated_2024.parquet`, loads the latest P1, P2, and P3 artifacts from MLflow, and writes predictions into `data/processed/`. `SAVE_CSV=true` also writes a CSV copy of each file.
-
-Expect these files:
-
-- `data/processed/predictions_p1_2024.parquet` and `.csv`, with `predicted_departures`
-- `data/processed/predictions_p2_2024.parquet` and `.csv`, with `predicted_risk`
-- `data/processed/predictions_p3_2024.parquet` and `.csv`, with `predicted_cluster`
-
-P1 and P2 have one row per gold demand row. P3 has one row per station. The log ends with `Inference complete for 2024`.
+`predict` loads the `@champion` version of each question and writes `predictions_p1_2024.parquet` (`predicted_departures`), `predictions_p2_2024.parquet` (`predicted_risk`), and `predictions_p3_2024.parquet` (`predicted_group`) to `data/processed/`. `SAVE_CSV=true` also writes CSV copies.

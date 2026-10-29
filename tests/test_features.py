@@ -126,7 +126,7 @@ def _point_lake_at(monkeypatch: pytest.MonkeyPatch, raw_dir: Path) -> None:
     monkeypatch.setattr(
         features,
         "DATA_LAKE_SETTINGS",
-        replace(DATA_LAKE_SETTINGS, PROCESSED_DIR=raw_dir),
+        replace(DATA_LAKE_SETTINGS, SILVER_DIR=raw_dir),
     )
 
 

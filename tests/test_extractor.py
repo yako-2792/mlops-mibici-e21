@@ -107,7 +107,7 @@ def test_download_trips_raises_when_the_month_is_missing(extractor: MiBiciExtrac
     """A year and month absent from the catalog stops the download."""
     _script_get(extractor, [_Response(text=CATALOG_HTML)])
 
-    with pytest.raises(StopIteration):
+    with pytest.raises(FileNotFoundError, match="datos_abiertos_1999_01"):
         extractor.download_trips(1999, 1)
 
 

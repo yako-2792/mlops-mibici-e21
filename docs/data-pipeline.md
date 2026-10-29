@@ -1,6 +1,6 @@
 # Data pipeline
 
-This document follows MiBici data from the public portal to the gold tables that the baseline models train on. It covers the data source, ingestion, storage and versioning, and the processing that runs before training.
+This document follows MiBici data from the public portal to the gold tables that the models train on. It covers the data source, ingestion, storage and versioning, and the processing that runs before training.
 
 For a runnable walkthrough from download to predictions, see [testing-e2e-flow.md](testing-e2e-flow.md).
 
@@ -18,15 +18,15 @@ data/temp/        Bronze  raw CSVs
         ▼
 data/raw/         Silver  mibici-trips-{year}.parquet, mibici-stations.parquet
         │  ▲
-        │  └── make download-data ◄── Hugging Face dataset (yako2792/mibici-dataset)
+        │  └── mlflow run . -e ingest ◄── Hugging Face dataset (yako2792/mibici-dataset), pinned revision
         │                               ▲
         │                               └── upload when HF=true
         │  features.py       clean, enrich, aggregate
         ▼
-data/processed/   Gold    features_{year}.parquet, demand_aggregated_{year}.parquet
+data/processed/   Gold    features_{year}.parquet, demand_aggregated_{year}.parquet, data_manifest_{year}.json
         │
         ▼
-baseline training (make train)
+training (mlflow run . -e train)
 ```
 
 | Layer | Path | What happens |
@@ -122,13 +122,12 @@ make ingest-trips-range START=2015 END=2024 HF=true
 | Directory | Layer | Contents |
 | --- | --- | --- |
 | `data/temp/` | Bronze | Downloaded CSVs. Safe to delete with `make clean-temp`. |
-| `data/raw/` | Silver | `mibici-trips-{year}.parquet`, `mibici-stations.parquet`, and `data-version.txt`. |
-| `data/processed/` | Gold | `features_{year}.parquet`, `demand_aggregated_{year}.parquet`, and prediction files. |
+| `data/raw/` | Silver | `mibici-trips-{year}.parquet` and `mibici-stations.parquet`. |
+| `data/processed/` | Gold | `features_{year}.parquet`, `demand_aggregated_{year}.parquet`, `data_manifest_{year}.json`, and prediction files. |
 
 Silver files are Parquet with PyArrow's default Snappy compression, one file per year.
 
-> [!NOTE]
-> `DATA_LAKE_SETTINGS.PROCESSED_DIR` points at `data/raw/`, not `data/processed/`. In the data lake settings, "processed" means the silver Parquet output of ingestion. Gold files use `FEATURE_STORE_SETTINGS.PROCESSED_DIR`, which is `data/processed/`.
+The paths live in `mibici_e21/config.py`: `DATA_LAKE_SETTINGS.TEMP_DIR` (bronze), `DATA_LAKE_SETTINGS.SILVER_DIR` (silver), and `FEATURE_STORE_SETTINGS.GOLD_DIR` (gold).
 
 ### Hugging Face dataset
 
@@ -139,7 +138,19 @@ The Hugging Face dataset [`yako2792/mibici-dataset`](https://huggingface.co/data
 
 ### Data version
 
-`make download-data` copies every `*.parquet` file from the dataset into `data/raw/` and writes the dataset commit SHA to `data/raw/data-version.txt`. Training reads that file and logs it as the MLflow param `dataset_version`, so each run records which data it used. When the file is missing, training logs `v1.0.0` and a warning.
+The dataset revision every clone trains on is pinned in `DATA_LAKE_SETTINGS.HF_DATASET_REVISION`. Changing it is a deliberate commit, so a newer snapshot never reaches training by accident.
+
+`mlflow run . -e ingest` downloads the trips of `MODELING_SETTINGS.TRAINING_YEAR` and the station catalog from that revision, builds the gold files, and writes `data/processed/data_manifest_{year}.json`:
+
+| Field | Content |
+| --- | --- |
+| `dataset_repo`, `dataset_revision` | Hugging Face dataset and the commit downloaded. |
+| `year` | Training year. |
+| `files` | For `stations`, `silver`, `gold_features`, and `gold_demand`: file name, SHA-256, size in bytes, and row count. |
+
+The manifest has no timestamps, so the same revision always yields the same manifest. The ingest run logs it under `data/`, and every training run logs it again next to its model. Before training, `read_data_manifest` checks the SHA-256 of the gold demand file and stops if the file changed after the ingestion.
+
+`make download-data` still downloads every Parquet file of the pinned revision for exploration, without a manifest.
 
 ---
 
@@ -173,7 +184,7 @@ One row per clean trip.
 
 ### 3. Station demand: `demand_aggregated_{year}.parquet`
 
-One row per station, date, and hour. This is the table the baselines train on.
+One row per station, date, and hour. This is the table every model trains on.
 
 | Column | Source |
 | --- | --- |
@@ -200,15 +211,17 @@ make materialize-features-range START=2015 END=2024
 
 ---
 
-## Handoff to the baselines
+## Handoff to modeling
 
-The baselines in `mibici_e21/modeling/` read only `demand_aggregated_{year}.parquet`. Their data settings live in `MODELING_SETTINGS` in `mibici_e21/config.py`:
+The models in `mibici_e21/modeling/` read `demand_aggregated_{year}.parquet`, and P3 also reads the station coordinates. Their data settings live in `MODELING_SETTINGS` in `mibici_e21/config.py`:
 
 | Setting | Default | Use |
 | --- | --- | --- |
-| `TEST_SPLIT_DATE` | `2023-10-01` | Rows before this date are training data, and rows on or after it are test data. |
+| `TRAINING_YEAR` | `2023` | Year that `ingest` downloads and every model trains on. |
+| `VAL_START_MONTH` | `8` | Validation starts on August 1. Earlier dates are training data. |
+| `TEST_START_MONTH` | `10` | Test starts on October 1 and runs to the end of the year. |
 | `BALANCE_THRESHOLD` | `5` | Absolute daily net flow that marks a station-day as `possible_empty` or `possible_full`. |
-| `PICO_HOURS` | `7, 8, 9, 17, 18, 19` | Hours counted as peak departures for station clustering. |
-| `SEED` | `42` | Random seed for sampling and KMeans. |
+| `PEAK_HOURS` | `7, 8, 9, 17, 18, 19` | Hours counted as peak departures for station clustering. |
+| `SEED` | `42` | Random seed of every estimator and sample. |
 
-To run the whole flow (download, features, train, predict), follow [testing-e2e-flow.md](testing-e2e-flow.md).
+To run the whole flow (ingest, train, register, predict), follow [testing-e2e-flow.md](testing-e2e-flow.md).

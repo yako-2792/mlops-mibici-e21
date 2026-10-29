@@ -1,0 +1,30 @@
+name: mlops-mibici-e21
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command: "python -m mibici_e21.dataset"
+
+  train:
+    parameters:
+      question: {type: string}
+      model: {type: string}
+      n_estimators: {type: string, default: ""}
+      max_depth: {type: string, default: ""}
+      n_clusters: {type: string, default: ""}
+      search: {type: string, default: "false"}
+    command: >
+      python -m mibici_e21.modeling.train
+      --question {question}
+      --model {model}
+      --n_estimators {n_estimators}
+      --max_depth {max_depth}
+      --n_clusters {n_clusters}
+      --search {search}
+
+  register:
+    parameters:
+      question: {type: string}
+      run_id: {type: string, default: ""}
+    command: "python -m mibici_e21.modeling.register --question {question} --run_id {run_id}"

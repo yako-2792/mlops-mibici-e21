@@ -55,21 +55,14 @@ class MiBiciExtractor:
 
         The catalog is matched by the `datos_abiertos_YYYY_MM` prefix. The file
         is saved as `datos_abiertos_YYYY_MM.csv`, whatever suffix the remote name has.
+        Raises `FileNotFoundError` when the month is not in the catalog.
         """
-        if not self.catalog:
-            self.discover_catalog()
-
         prefix = f"datos_abiertos_{year}_{month:02d}"
-        remote_filename = next(f for f in self.catalog if f.startswith(prefix))
-        return self._download_file(remote_filename, target_filename=f"{prefix}.csv")
+        return self._download_file(self._find_in_catalog(prefix), target_filename=f"{prefix}.csv")
 
     def download_stations(self) -> Path:
         """Download the station catalog CSV whose name starts with `nomenclatura_`."""
-        if not self.catalog:
-            self.discover_catalog()
-
-        filename = next(f for f in self.catalog if f.startswith("nomenclatura_"))
-        return self._download_file(filename)
+        return self._download_file(self._find_in_catalog("nomenclatura_"))
 
     def discover_catalog(self) -> dict[str, str]:
         """Read the open-data page and map each CSV filename to its absolute URL."""
@@ -82,6 +75,19 @@ class MiBiciExtractor:
         logger.info(f"Catalog loaded: {len(self.catalog)} CSV files")
         return self.catalog
 
+    def _find_in_catalog(self, prefix: str) -> str:
+        """Return the first catalog filename that starts with `prefix`.
+
+        Raises `FileNotFoundError` when no filename matches.
+        """
+        if not self.catalog:
+            self.discover_catalog()
+
+        filename = next((name for name in self.catalog if name.startswith(prefix)), None)
+        if filename is None:
+            raise FileNotFoundError(f"No file starting with {prefix} in the MiBici catalog")
+        return filename
+
     def _download_file(self, file_name: str, target_filename: str | None = None) -> Path:
         """Stream one catalog file into `temp_dir`.
 
@@ -92,7 +98,6 @@ class MiBiciExtractor:
             self.discover_catalog()
 
         if file_name not in self.catalog:
-            logger.error(f"{file_name} is not in the catalog")
             raise FileNotFoundError(f"File {file_name} not found in catalog")
 
         local_filename = target_filename or file_name

@@ -6,13 +6,14 @@ the MLflow code is written once for P1, P2, and P3.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 import time
 from typing import ClassVar
 
 from matplotlib.figure import Figure
+import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, clone
 
@@ -20,6 +21,7 @@ from mibici_e21.config import MODELING_SETTINGS, TRACKING_SETTINGS
 from mibici_e21.schemas.columns import GoldColumns
 
 Hyperparameters = dict[str, int]
+"""Resolved hyperparameters of a model, such as `{"n_estimators": 200, "max_depth": 14}`."""
 
 BASELINE = "baseline"
 
@@ -148,10 +150,13 @@ class Question(ABC):
         """Name in the Model Registry, such as `mibici-equipo21-p1-demanda`."""
         return f"{TRACKING_SETTINGS.EXPERIMENT_NAME}-{self.registered_model_suffix}"
 
-    def build_estimator(self, model: str, hyperparameters: Hyperparameters) -> BaseEstimator:
+    def build_estimator(
+        self, model: str, hyperparameters: Mapping[str, int | None]
+    ) -> BaseEstimator:
         """Build the unfitted estimator of a model.
 
-        Raises `ValueError` for an unknown model or a missing hyperparameter.
+        `hyperparameters` may hold extra names, and `None` for unset values. Raises
+        `ValueError` for an unknown model or a missing hyperparameter.
         """
         spec = self.model_spec(model)
         missing = [name for name in spec.hyperparameters if hyperparameters.get(name) is None]
@@ -183,12 +188,12 @@ class SupervisedQuestion(Question):
     target_column: str
 
     @abstractmethod
-    def metrics(self, y_true: pd.Series, y_pred, prefix: str) -> dict[str, float]:
+    def metrics(self, y_true: pd.Series, y_pred: np.ndarray, prefix: str) -> dict[str, float]:
         """Return the metrics of a prediction, each name starting with `prefix_`."""
 
     @abstractmethod
     def figures(
-        self, test: pd.DataFrame, test_pred, estimator: BaseEstimator
+        self, test: pd.DataFrame, test_pred: np.ndarray, estimator: BaseEstimator
     ) -> dict[str, Figure]:
         """Return the diagnostic figures of the final estimator on the test set."""
 

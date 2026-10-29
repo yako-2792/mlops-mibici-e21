@@ -4,8 +4,11 @@ A run started here resumes the run that `mlflow run` created, when there is one,
 project run is the training run (or the search parent) instead of an empty sibling.
 """
 
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
+import warnings
 
 import matplotlib.pyplot as plt
 import mlflow
@@ -29,13 +32,17 @@ CANDIDATE = "candidate"
 SEARCH = "search"
 INPUT_EXAMPLE_ROWS = 5
 RUN_CONFIG_FILES = ("MLproject", "python_env.yaml")
+KNOWN_MLFLOW_WARNINGS = (
+    "Hint: Inferred schema contains integer",
+    "The specified dataset source can be interpreted in multiple ways",
+)
 
 
 def train_run(
     question: Question,
     data: pd.DataFrame,
     model: str,
-    hyperparameters: Hyperparameters,
+    hyperparameters: Mapping[str, int | None],
     manifest: dict,
     search_run_id: str | None = None,
 ) -> str:
@@ -44,7 +51,7 @@ def train_run(
     - `question`: question being answered.
     - `data`: output of `question.prepare`.
     - `model`: model name, `baseline` or a candidate such as `rf`.
-    - `hyperparameters`: values for the model hyperparameters. Extra keys are ignored.
+    - `hyperparameters`: values for the model hyperparameters. Extra names are ignored.
     - `manifest`: data manifest of the ingestion the data comes from.
     - `search_run_id`: search that chose `hyperparameters`, recorded as a tag.
 
@@ -158,10 +165,11 @@ def _log_data(question: Question, evaluation: Evaluation, year: int) -> None:
     """
     log_data_manifest(data_manifest_path(year))
     source = FEATURE_STORE_SETTINGS.GOLD_DIR / f"demand_aggregated_{year}.parquet"
-    dataset = mlflow.data.from_pandas(
-        evaluation.training_frame, source=str(source), name=f"{question.key}_train_{year}"
-    )
-    mlflow.log_input(dataset, context="training")
+    with _known_mlflow_warnings_silenced():
+        dataset = mlflow.data.from_pandas(
+            evaluation.training_frame, source=str(source), name=f"{question.key}_train_{year}"
+        )
+        mlflow.log_input(dataset, context="training")
 
 
 def _log_config(
@@ -200,12 +208,27 @@ def _log_model(question: Question, evaluation: Evaluation) -> None:
     anywhere. The model URI goes into the `model_uri` tag, which the registry reads.
     """
     example = evaluation.training_frame[list(question.feature_columns)].head(INPUT_EXAMPLE_ROWS)
-    info = mlflow.sklearn.log_model(
-        evaluation.estimator,
-        name="model",
-        signature=infer_signature(example, evaluation.estimator.predict(example)),
-        input_example=example,
-        code_paths=[str(PROJ_ROOT / "mibici_e21")],
-        serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
-    )
+    with _known_mlflow_warnings_silenced():
+        info = mlflow.sklearn.log_model(
+            evaluation.estimator,
+            name="model",
+            signature=infer_signature(example, evaluation.estimator.predict(example)),
+            input_example=example,
+            code_paths=[str(PROJ_ROOT / "mibici_e21")],
+            serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+        )
     mlflow.set_tag("model_uri", info.model_uri)
+
+
+@contextmanager
+def _known_mlflow_warnings_silenced() -> Iterator[None]:
+    """Silence two MLflow warnings that do not apply to this project.
+
+    - Integer columns cannot hold missing values: the features are built without them.
+    - A local dataset source matches two source types: MLflow registers the same local
+      artifact source twice and picks it either way.
+    """
+    with warnings.catch_warnings():
+        for message in KNOWN_MLFLOW_WARNINGS:
+            warnings.filterwarnings("ignore", message=message, category=UserWarning)
+        yield

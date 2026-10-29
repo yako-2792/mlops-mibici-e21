@@ -104,7 +104,7 @@ class RiskQuestion(SupervisedQuestion):
     def search_space(self, model: str) -> list[Hyperparameters]:
         return tree_search_space()
 
-    def metrics(self, y_true: pd.Series, y_pred, prefix: str) -> dict[str, float]:
+    def metrics(self, y_true: pd.Series, y_pred: np.ndarray, prefix: str) -> dict[str, float]:
         recalls = recall_score(
             y_true, y_pred, labels=list(RISK_CLASSES), average=None, zero_division=0
         )
@@ -123,7 +123,7 @@ class RiskQuestion(SupervisedQuestion):
         }
 
     def figures(
-        self, test: pd.DataFrame, test_pred, estimator: BaseEstimator
+        self, test: pd.DataFrame, test_pred: np.ndarray, estimator: BaseEstimator
     ) -> dict[str, Figure]:
         figures = {"confusion_matrix.png": _confusion_matrix(test[RISK], test_pred)}
         if hasattr(estimator, "predict_proba"):
@@ -182,7 +182,7 @@ def label_risk(balance: pd.Series) -> np.ndarray:
     )
 
 
-def _confusion_matrix(y_true: pd.Series, y_pred) -> Figure:
+def _confusion_matrix(y_true: pd.Series, y_pred: np.ndarray) -> Figure:
     fig, ax = plt.subplots(figsize=(6, 5))
     ConfusionMatrixDisplay.from_predictions(
         y_true, y_pred, labels=list(RISK_CLASSES), normalize="true", ax=ax, colorbar=False

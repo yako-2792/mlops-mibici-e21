@@ -13,16 +13,15 @@ import mlflow
 import mlflow.pyfunc
 import pandas as pd
 
-from mibici_e21.config import PREDICT_SETTINGS, TRACKING_SETTINGS
+from mibici_e21.config import PREDICT_SETTINGS, REGISTRY_SETTINGS, TRACKING_SETTINGS
 from mibici_e21.features import load_gold_demand
 from mibici_e21.modeling.base import Question
 from mibici_e21.modeling.questions import QUESTIONS
-from mibici_e21.modeling.register import CHAMPION
 
 
 def champion_uri(question: Question) -> str:
     """Return the URI of the production model of a question."""
-    return f"models:/{question.registered_model_name}@{CHAMPION}"
+    return f"models:/{question.registered_model_name}@{REGISTRY_SETTINGS.CHAMPION_ALIAS}"
 
 
 def predict_question(question: Question, gold: pd.DataFrame) -> pd.DataFrame:

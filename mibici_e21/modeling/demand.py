@@ -81,7 +81,7 @@ class DemandQuestion(SupervisedQuestion):
     def search_space(self, model: str) -> list[Hyperparameters]:
         return tree_search_space()
 
-    def metrics(self, y_true: pd.Series, y_pred, prefix: str) -> dict[str, float]:
+    def metrics(self, y_true: pd.Series, y_pred: np.ndarray, prefix: str) -> dict[str, float]:
         return {
             f"{prefix}_MAE": float(mean_absolute_error(y_true, y_pred)),
             f"{prefix}_RMSE": float(np.sqrt(mean_squared_error(y_true, y_pred))),
@@ -89,7 +89,7 @@ class DemandQuestion(SupervisedQuestion):
         }
 
     def figures(
-        self, test: pd.DataFrame, test_pred, estimator: BaseEstimator
+        self, test: pd.DataFrame, test_pred: np.ndarray, estimator: BaseEstimator
     ) -> dict[str, Figure]:
         frame = pd.DataFrame(
             {"actual": test[self.target_column].to_numpy(), "predicted": test_pred}

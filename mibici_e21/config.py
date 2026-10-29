@@ -127,6 +127,22 @@ class ModelingSettings:
 MODELING_SETTINGS = ModelingSettings()
 
 
+# Registry config
+@dataclass(frozen=True)
+class RegistrySettings:
+    """Aliases of the Model Registry lifecycle.
+
+    - `CHAMPION_ALIAS`: version in production, the one batch inference loads.
+    - `CHALLENGER_ALIAS`: runner-up version, kept ready to compare or swap in.
+    """
+
+    CHAMPION_ALIAS: str = "champion"
+    CHALLENGER_ALIAS: str = "challenger"
+
+
+REGISTRY_SETTINGS = RegistrySettings()
+
+
 # Predict config
 @dataclass(frozen=True)
 class PredictSettings:

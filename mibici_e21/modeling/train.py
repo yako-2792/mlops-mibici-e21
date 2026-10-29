@@ -52,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     question = QUESTIONS[args.question]
-    question.model_spec(args.model)
+    question.model_spec(args.model)  # Fail on an unknown model before loading any data.
 
     configure_tracking()
     year = MODELING_SETTINGS.TRAINING_YEAR

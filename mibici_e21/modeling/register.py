@@ -21,14 +21,14 @@ from mlflow.entities import Run
 from mlflow.entities.model_registry import ModelVersion
 import mlflow.pyfunc
 
-from mibici_e21.config import TRACKING_SETTINGS
+from mibici_e21.config import REGISTRY_SETTINGS, TRACKING_SETTINGS
 from mibici_e21.modeling.base import BASELINE, Question
 from mibici_e21.modeling.questions import QUESTIONS
 from mibici_e21.modeling.runs import CANDIDATE
 from mibici_e21.tracking import base_tags, configure_tracking
 
-CHAMPION = "champion"
-CHALLENGER = "challenger"
+CHAMPION = REGISTRY_SETTINGS.CHAMPION_ALIAS
+CHALLENGER = REGISTRY_SETTINGS.CHALLENGER_ALIAS
 
 
 @dataclass(frozen=True)

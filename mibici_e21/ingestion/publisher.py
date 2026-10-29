@@ -62,12 +62,10 @@ class MiBiciPublisher:
             path = self.output_dir / path
 
         if not path.exists():
-            logger.error(f"Local file not found: {path.name}")
-            raise FileNotFoundError(f"El archivo local '{path}' no existe.")
+            raise FileNotFoundError(f"Local file {path} does not exist.")
 
         if not self.hf_repo_id or not self._api:
-            logger.error("Hugging Face repo is not configured")
-            raise ValueError("HF_REPO_ID no está configurado en DATA_LAKE_SETTINGS.")
+            raise ValueError("HF_DATASET_REPO is not set in DATA_LAKE_SETTINGS.")
 
         target_repo_path = path_in_repo or path.name
         logger.info(f"Uploading {path.name} to {self.hf_repo_id}")

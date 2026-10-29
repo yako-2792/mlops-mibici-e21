@@ -42,7 +42,7 @@ class IngestionPipeline:
         for month in range(1, 13):
             try:
                 csv_path = self.extractor.download_trips(year, month)
-            except StopIteration:
+            except FileNotFoundError:
                 logger.info(f"Trips {year}-{month:02d}: not in catalog")
                 continue
             table = self.transformer.transform_trips(csv_path)
@@ -87,7 +87,7 @@ class IngestionPipeline:
             try:
                 path = self.ingest_trips_year(year, push_to_hf=push_to_hf)
                 parquet_paths.append(path)
-            except ValueError as e:
-                logger.warning(f"Skipping {year}: {e}")
+            except ValueError as error:
+                logger.warning(f"Skipping {year}: {error}")
         logger.info(f"Trip range complete: {len(parquet_paths)} files")
         return parquet_paths

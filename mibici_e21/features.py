@@ -160,6 +160,28 @@ def materialize_yearly_trip_features(
     return output_features, output_demand
 
 
+def load_gold_demand(year: int, processed_dir: Path | None = None) -> pd.DataFrame:
+    """Load `demand_aggregated_{year}.parquet` with `date` parsed to datetime.
+
+    - `year`: demand year used in the file name.
+    - `processed_dir`: directory of the gold files. Defaults to
+      `FEATURE_STORE_SETTINGS.PROCESSED_DIR` (`data/processed`).
+
+    Raises `FileNotFoundError` when the file is missing.
+    """
+    directory = processed_dir or FEATURE_STORE_SETTINGS.PROCESSED_DIR
+    demand_path = directory / f"demand_aggregated_{year}.parquet"
+    if not demand_path.exists():
+        raise FileNotFoundError(
+            f"No gold demand for {year} at {demand_path}. Run `mlflow run . -e ingest` first."
+        )
+
+    logger.info(f"Loading gold demand for {year} from {demand_path}")
+    demand = pd.read_parquet(demand_path, engine="pyarrow")
+    demand[GoldColumns.DATE] = pd.to_datetime(demand[GoldColumns.DATE])
+    return demand
+
+
 def materialize_features_range(
     start_year: int,
     end_year: int,

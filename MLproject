@@ -8,12 +8,12 @@ entry_points:
 
   train:
     parameters:
-      question: {type: str, default: "p1"}
-      model: {type: str, default: "baseline"}
-      n_estimators: {type: int, default: 100}
-      max_depth: {type: int, default: 10}
-      n_clusters: {type: int, default: 3}
-      search: {type: str, default: "false"}
+      question: {type: string}
+      model: {type: string}
+      n_estimators: {type: string, default: ""}
+      max_depth: {type: string, default: ""}
+      n_clusters: {type: string, default: ""}
+      search: {type: string, default: "false"}
     command: >
       python -m mibici_e21.modeling.train
       --question {question}

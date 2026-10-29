@@ -1,7 +1,7 @@
 """Reproducible ingestion: download a pinned snapshot, build gold features, write a manifest.
 
 `python -m mibici_e21.dataset` is the `ingest` entry point of the MLflow Project. It ingests
-`MODELING_SETTINGS.DEFAULT_YEAR`, the year every model trains on.
+`MODELING_SETTINGS.TRAINING_YEAR`, the year every model trains on.
 """
 
 import hashlib
@@ -204,7 +204,7 @@ def clean_all_data_files() -> None:
 
 def main() -> None:
     """Ingest the training year and log its manifest to MLflow."""
-    year = MODELING_SETTINGS.DEFAULT_YEAR
+    year = MODELING_SETTINGS.TRAINING_YEAR
     configure_tracking()
     manifest_path = ingest_year(year)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

@@ -27,7 +27,8 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 
 - [Data architecture and pipeline](#data-architecture-and-pipeline)
 - [Quick start](#quick-start)
-- [MLflow Tracking & Reproducibility (MLproject)](#mlflow-tracking--reproducibility-mlproject)
+- [MLflow Project and tracking](#mlflow-project-and-tracking)
+- [Model Registry and lifecycle](#model-registry-and-lifecycle)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
 - [Git and GitHub workflow](#git-and-github-workflow)
@@ -36,12 +37,12 @@ The pipeline downloads the public monthly catalogs, casts them to a strict PyArr
 
 ## Data architecture and pipeline
 
-The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze, `data/temp/`), casts them to strict PyArrow schemas and publishes yearly Parquet files (silver, `data/raw/`, shared on Hugging Face), then cleans and aggregates them into the station-demand tables the baselines train on (gold, `data/processed/`).
+The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze, `data/temp/`), casts them to strict PyArrow schemas and publishes yearly Parquet files (silver, `data/raw/`, shared on Hugging Face), then cleans and aggregates them into the station-demand tables the models train on (gold, `data/processed/`).
 
 | Document | What it covers |
 | --- | --- |
 | [docs/data-pipeline.md](docs/data-pipeline.md) | Data source, ingestion and schemas, storage and versioning, cleaning and gold features, and the handoff to the baselines. |
-| [docs/testing-e2e-flow.md](docs/testing-e2e-flow.md) | Commands to download the data, build features, train, and predict end to end. |
+| [docs/testing-e2e-flow.md](docs/testing-e2e-flow.md) | Steps from a clean clone to batch predictions served by the champion models. |
 
 ---
 
@@ -68,57 +69,176 @@ source .venv/bin/activate
 > `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
 
 ---
-## MLflow Tracking & Reproducibility
-To guarantee experiment traceability and enable the Model Registry, we use a local tracking server backed by a SQLite database (`mlflow.db`). Both `mlflow.db` and `mlartifacts/` are excluded in `.gitignore`.
+## MLflow Project and tracking
 
-In a dedicated terminal, start the local server supporting SQLite and custom artifact storage:
+The repository is an [MLflow Project](https://mlflow.org/docs/latest/ml/projects/): every ingestion, baseline, search, and candidate run is launched with `mlflow run`, and all of them live in one experiment, `mibici-equipo21`. The `stage_of_work` tag tells baselines, searches, and candidates apart.
+
+### 1. Start the tracking server
+
+The Model Registry needs a database-backed store. In a dedicated terminal, start a local server with SQLite:
 
 ```bash
 uv run mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlartifacts --port 5000
 ```
 
-In the terminal, point `MLFLOW_TRACKING_URI` to the local server:
+`make mlflow-server` runs the same command. `mlflow.db`, `mlartifacts/`, and `mlruns/` are gitignored.
+
+### 2. Point the shell at it
 
 ```bash
-export MLFLOW_TRACKING_URI=[http://127.0.0.1:5000](http://127.0.0.1:5000)
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_EXPERIMENT_NAME=mibici-equipo21
 ```
 
+`mlflow run` creates its run before the code starts, in the experiment named by `MLFLOW_EXPERIMENT_NAME`. The code then resumes that run, so the run you launch is the run that holds the results. If the variable is missing, the run lands in `Default` and the code stops with the export to run.
+
+### 3. Entry points
+
+`MLproject` declares the environment (`python_env.yaml`, pinned to the same versions as `uv.lock`) and three entry points. The year, split dates, seed, and search grids live only in `mibici_e21/config.py`, so no entry point repeats them.
+
+| Entry point | Parameters | What it does |
+| --- | --- | --- |
+| `ingest` | none | Downloads the training year and the station catalog from a pinned Hugging Face revision, builds the gold files, and logs the data manifest. |
+| `train` | `question` (`p1`, `p2`, `p3`), `model`, `n_estimators`, `max_depth`, `n_clusters`, `search` | Trains one model, or runs a nested search with `search=true`, and logs it. |
+| `register` | `question`, optional `run_id` | Promotes the best candidate that beats the baseline to `@champion`. |
+
+Models by question:
+
+| Question | `model` | Hyperparameters |
+| --- | --- | --- |
+| `p1` demand regression | `baseline` (station-hour mean), `rf`, `hgb` | `n_estimators`, `max_depth` |
+| `p2` risk classification | `baseline` (station mode), `rf`, `hgb` | `n_estimators`, `max_depth` |
+| `p3` station clustering | `baseline` (KMeans, k=3), `kmeans` | `n_clusters` |
+
+A model ignores hyperparameters it does not use, and a candidate without its hyperparameters stops with the `-P` flags it needs. With `search=true`, the launched run becomes the search parent, each combination of the grid in `config.py` is a nested child scored on validation, and the best combination is then trained as a candidate tagged with `search_run_id`.
+
+`--env-manager uv` builds an isolated environment from `uv.lock`. `--env-manager local` reuses the active `.venv` and skips that step.
+
+### 4. Reproduce every run from a clean clone
+
 ```bash
+git clone <repository-url>
+cd mlops-mibici-e21
+uv sync
 source .venv/bin/activate
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_EXPERIMENT_NAME=mibici-equipo21
 
-# Datos
-mlflow run . -e ingest --env-manager=local
+mlflow run . -e ingest --env-manager uv
 
 # Baselines
-mlflow run . -e train -P question=p1 -P model=baseline --env-manager=local
-mlflow run . -e train -P question=p2 -P model=baseline --env-manager=local
-mlflow run . -e train -P question=p3 -P model=baseline --env-manager=local
+mlflow run . -e train -P question=p1 -P model=baseline --env-manager uv
+mlflow run . -e train -P question=p2 -P model=baseline --env-manager uv
+mlflow run . -e train -P question=p3 -P model=baseline --env-manager uv
 
-# P1: tres candidatas (la tercera sale de una búsqueda con nested runs)
-mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=100 -P max_depth=10 --env-manager=local
-mlflow run . -e train -P question=p1 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager=local
-mlflow run . -e train -P question=p1 -P model=rf -P search=true --env-manager=local
+# P1 candidates
+mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=200 -P max_depth=20 --env-manager uv
+mlflow run . -e train -P question=p1 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager uv
+mlflow run . -e train -P question=p1 -P model=hgb -P search=true --env-manager uv
 
-# P2: tres candidatas
-mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=100 -P max_depth=10 --env-manager=local
-mlflow run . -e train -P question=p2 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager=local
-mlflow run . -e train -P question=p2 -P model=rf -P search=true --env-manager=local
+# P2 candidates
+mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=200 -P max_depth=14 --env-manager uv
+mlflow run . -e train -P question=p2 -P model=hgb -P n_estimators=200 -P max_depth=8 --env-manager uv
+mlflow run . -e train -P question=p2 -P model=hgb -P search=true --env-manager uv
 
-# P3: tres candidatas
-mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=4 --env-manager=local
-mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=5 --env-manager=local
-mlflow run . -e train -P question=p3 -P search=true --env-manager=local
+# P3 candidates
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=4 --env-manager uv
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=5 --env-manager uv
+mlflow run . -e train -P question=p3 -P model=kmeans -P search=true --env-manager uv
 
-# Model Registry: registra la mejor candidata de cada pregunta con el alias champion
-mlflow run . -e register -P question=p1 --env-manager=local
-mlflow run . -e register -P question=p2 --env-manager=local
-mlflow run . -e register -P question=p3 --env-manager=local
+# Promote the champion of each question
+mlflow run . -e register -P question=p1 --env-manager uv
+mlflow run . -e register -P question=p2 --env-manager uv
+mlflow run . -e register -P question=p3 --env-manager uv
 ```
+
+### 5. Chosen model of each question
+
+Results of the commands above on dataset revision `11e35bd`. Each champion beats its baseline on the validation metric, which is the metric the registry compares.
+
+| Question | Champion | Baseline → champion (validation) | Baseline → champion (test) | Challenger |
+| --- | --- | --- | --- | --- |
+| P1 | Random forest, 200 trees, depth 20 | `val_MAE` 1.423 → 1.296 (8.9% lower) | `test_MAE` 1.469 → 1.294, `test_R2` 0.481 → 0.594 | Boosting, 400 iterations, depth 14 (`val_MAE` 1.349, 3.4× faster to train) |
+| P2 | Random forest, 200 trees, depth 14 | `val_f1_macro` 0.641 → 0.666 | `test_f1_macro` 0.631 → 0.664, recall of `possible_empty` 0.47 → 0.72 and `possible_full` 0.51 → 0.76 | Boosting, 100 iterations, depth 20 (`val_f1_macro` 0.660) |
+| P3 | KMeans, k=2 | `silhouette` 0.595 → 0.614 | No test split: clustering fits the whole year | None: no other candidate beats the baseline |
+
+To reproduce only the chosen models from a clean clone, run `ingest`, the baseline of each question, and these commands, then `register`:
+
+```bash
+mlflow run . -e train -P question=p1 -P model=rf -P n_estimators=200 -P max_depth=20 --env-manager uv
+mlflow run . -e train -P question=p2 -P model=rf -P n_estimators=200 -P max_depth=14 --env-manager uv
+mlflow run . -e train -P question=p3 -P model=kmeans -P n_clusters=2 --env-manager uv
+```
+
+### 6. What each run records
+
+| Tag | Values |
+| --- | --- |
+| `question`, `task` | `p1` regression, `p2` classification, `p3` clustering |
+| `model_family` | `historical_mean`, `historical_mode`, `random_forest`, `hist_gradient_boosting`, `kmeans` |
+| `stage_of_work` | `ingest`, `baseline`, `search`, `candidate`, `register` |
+| `team`, `git_commit`, `git_dirty` | Team number, full commit, and whether the tree had uncommitted changes |
+| `dataset_revision` | Hugging Face commit of the data |
+| `search_run_id` | Search that chose the hyperparameters of a candidate |
+
+Every baseline and candidate run logs:
+
+| Artifact | Content |
+| --- | --- |
+| model | Estimator with its signature, a 5-row input example, and the `mibici_e21` code |
+| `plots/` | P1: actual vs predicted and residuals by hour. P2: normalized confusion matrix and precision-recall by class. P3: groups, group profiles, and a station map. |
+| `data/` | The data manifest of the ingestion: revision plus SHA-256, size, and rows of each file |
+| `config/` | `run_config.json` with the resolved settings and estimator params, `MLproject`, and `python_env.yaml` |
+| input | The training frame through `mlflow.log_input`. It is aggregated by station, so no rider data is logged. |
+
+P1 and P2 log `val_` metrics, from a fit on January through July scored on August and September, and `test_` metrics, from a refit on January through September scored on October through December. Searches and the registry compare `val_` metrics only, so the test months never influence a choice. P3 has no target, so it fits on the whole year and logs silhouette, Davies-Bouldin, Calinski-Harabasz, and `stability_ari` across seeds. Every run also logs `train_seconds` and `predict_seconds`.
+
+---
+
+## Model Registry and lifecycle
+
+Each question has one registered model with a description:
+
+| Question | Registered model | Selection metric |
+| --- | --- | --- |
+| P1 | `mibici-equipo21-p1-demanda` | `val_MAE`, lower is better |
+| P2 | `mibici-equipo21-p2-riesgo` | `val_f1_macro`, higher is better |
+| P3 | `mibici-equipo21-p3-grupos` | `silhouette`, higher is better |
+
+**Scheme: aliases.** The production version carries the `champion` alias, and the runner-up carries `challenger`. We chose aliases over stages for three reasons:
+
+1. MLflow deprecated stages (`Staging`, `Production`) in favor of aliases, so new code should not depend on them.
+2. An alias is a movable pointer. Promoting a model or rolling it back is one reassignment, and consumers keep loading the same URI, `models:/<name>@champion`.
+3. `challenger` keeps the next best version registered and ready to compare or swap in, which stages only modeled loosely.
+
+`register` promotes a candidate only when it beats the latest baseline of its question on the selection metric, so production never regresses below the baseline. It reuses the version of a run that is already registered, and it records the lineage as version tags: `experiment`, `source_run_id`, `source_run_name`, `git_commit`, `dataset_revision`, `model_family`, `selection_metric`, `selection_value`, `baseline_run_id`, and `baseline_value`. To promote a specific candidate, for example a cheaper one with a similar score, pass `-P run_id=<run id>`.
+
+Registration ends by loading the champion by name and alias and scoring its input example. To load it yourself:
+
+```python
+import mlflow
+
+model = mlflow.pyfunc.load_model("models:/mibici-equipo21-p1-demanda@champion")
+predictions = model.predict(model.input_example)
+```
+
+`make predict YEAR=2024` scores a whole year with the three champions.
 
 ---
 
 ## Makefile
+
+### MLflow Project
+
+These targets wrap `mlflow run` with `--env-manager uv` and export `MLFLOW_TRACKING_URI` and `MLFLOW_EXPERIMENT_NAME` from `config.py`. `ENV_MANAGER=local` reuses the active environment.
+
+| Command | What it does |
+| --- | --- |
+| `make mlflow-server` | Start the SQLite tracking server on port 5000. |
+| `make ingest` | Run the `ingest` entry point. |
+| `make train Q=p1 MODEL=rf PARAMS="-P n_estimators=200 -P max_depth=20"` | Run the `train` entry point. |
+| `make register Q=p1` | Run the `register` entry point. |
+| `make predict YEAR=2024 SAVE_CSV=true` | Score a year with the three champions. |
 
 ### Ingestion
 
@@ -140,7 +260,7 @@ make ingest-trips-range START=2015 END=2024 HF=true
 
 | Command | What it does |
 | --- | --- |
-| `make download-data` | Download the dataset `*.parquet` files from Hugging Face into `data/raw/`. |
+| `make download-data` | Download every `*.parquet` file of the pinned dataset revision into `data/raw/`. |
 
 ```bash
 make download-data
@@ -209,33 +329,44 @@ make test
 ## Project organization
 
 ```text
-├── Makefile                <- ingest, download, features, train, predict, clean, lint, and test
-├── MLproject               <- MLflow Project entry points (ingest, train) and parameters
-├── python_env.yaml         <- pinned Python environment for MLflow reproducibility
+├── Makefile                <- MLflow Project targets, ingestion, features, clean, lint, and test
+├── MLproject               <- MLflow Project: environment and the ingest, train, and register entry points
+├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
-├── pyproject.toml          <- package metadata and Ruff configuration
+├── pyproject.toml          <- dependencies, Ruff, and pytest configuration
+├── uv.lock                 <- locked dependency versions
 ├── data
 │   ├── temp                <- Bronze: CSVs downloaded by the extractor
 │   ├── raw                 <- Silver: data lake Parquet files
-│   ├── processed           <- Gold: trip features, station demand, and predictions
+│   ├── processed           <- Gold: trip features, station demand, data manifest, and predictions
 │   ├── interim
 │   └── external
 ├── docs
-│   ├── data-pipeline.md    <- data source, ingestion, storage, and gold processing
-│   ├── testing-e2e-flow.md <- end-to-end download, features, train, and predict
+│   ├── data-pipeline.md    <- data source, ingestion, storage, versioning, and gold processing
+│   ├── testing-e2e-flow.md <- clean clone to champion predictions, step by step
 │   └── Machine Learning Canvas.pdf
 ├── reports
-│   └── figures             <- generated EDA plots (demanda_hora.png, top_estaciones.png, total_dias.png)
+│   └── figures             <- EDA figures written by plots.py
+├── tests                   <- unit tests of ingestion, features, and data cleanup
 └── mibici_e21
-    ├── config.py           <- paths, Hugging Face repo, HF_TOKEN, and MLflow/modeling settings
-    ├── dataset.py          <- download Parquet from Hugging Face and clean local data
-    ├── features.py         <- clean silver trips and build gold features
+    ├── config.py           <- paths, data revision, tracking, and modeling settings
+    ├── dataset.py          <- ingest entry point: pinned download, gold build, data manifest
+    ├── features.py         <- clean silver trips, build and load gold features
+    ├── tracking.py         <- MLflow setup and lineage tags shared by every entry point
     ├── plots.py            <- EDA figures into reports/figures
     ├── modeling
-    │   ├── train.py        <- train baselines and candidate models, log to MLflow & Registry
-    │   └── predict.py      <- batch inference for P1, P2, and P3
+    │   ├── base.py         <- Question contract and temporal split
+    │   ├── baselines.py    <- historical baselines as scikit-learn estimators
+    │   ├── demand.py       <- P1: hourly departures per station
+    │   ├── risk.py         <- P2: daily empty or full risk per station
+    │   ├── clusters.py     <- P3: station groups by usage profile
+    │   ├── questions.py    <- the three questions by key
+    │   ├── runs.py         <- MLflow logging of training runs and nested searches
+    │   ├── train.py        <- train entry point
+    │   ├── register.py     <- register entry point: champion and challenger aliases
+    │   └── predict.py      <- batch inference with the champion models
     ├── schemas
-    │   ├── columns.py      <- trip and station column names
+    │   ├── columns.py      <- trip, station, and gold column names
     │   ├── trips.py        <- TRIPS PyArrow schema
     │   └── stations.py     <- STATIONS PyArrow schema
     └── ingestion

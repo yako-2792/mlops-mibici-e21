@@ -19,8 +19,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from mibici_e21.config import MODELING_SETTINGS
+from mibici_e21.features import load_station_locations
 from mibici_e21.modeling.base import BASELINE, Evaluation, Hyperparameters, ModelSpec, Question
-from mibici_e21.schemas.columns import GoldColumns
+from mibici_e21.schemas.columns import GoldColumns, StationColumns
 
 SEED = MODELING_SETTINGS.SEED
 DEPARTURES = "departures"
@@ -82,7 +83,8 @@ class ClusterQuestion(Question):
     }
 
     def prepare(self, gold: pd.DataFrame) -> pd.DataFrame:
-        return build_station_profiles(gold)
+        profiles = build_station_profiles(gold)
+        return profiles.merge(load_station_locations(), on=GoldColumns.STATION_ID, how="left")
 
     def search_space(self, model: str) -> list[Hyperparameters]:
         return [{"n_clusters": k} for k in MODELING_SETTINGS.SEARCH_N_CLUSTERS]
@@ -101,6 +103,7 @@ class ClusterQuestion(Question):
             figures={
                 "clusters.png": _clusters_scatter(features, labels),
                 "cluster_profiles.png": _cluster_profiles(features, labels),
+                "station_map.png": _station_map(data, labels),
             },
             training_frame=data,
             row_counts={"stations": len(data)},
@@ -151,9 +154,8 @@ def _stability(estimator: Pipeline, features: pd.DataFrame, labels: np.ndarray) 
 
 def _clusters_scatter(features: pd.DataFrame, labels: np.ndarray) -> Figure:
     fig, ax = plt.subplots(figsize=(6, 5))
-    scatter = ax.scatter(features[DEPARTURES], features[ARRIVALS], c=labels, alpha=0.7)
+    _scatter_by_group(ax, features[DEPARTURES], features[ARRIVALS], labels)
     ax.set(xlabel="Yearly departures", ylabel="Yearly arrivals", title="Stations by group")
-    fig.colorbar(scatter, ax=ax, label="Group")
     fig.tight_layout()
     return fig
 
@@ -167,3 +169,27 @@ def _cluster_profiles(features: pd.DataFrame, labels: np.ndarray) -> Figure:
     ax.set(ylabel="Mean per station", title="Group profiles")
     fig.tight_layout()
     return fig
+
+
+def _station_map(data: pd.DataFrame, labels: np.ndarray) -> Figure:
+    """Plot each station at its coordinates, colored by group. Unlocated stations are skipped."""
+    located = data[StationColumns.LATITUDE].notna().to_numpy()
+    stations = data[located]
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    _scatter_by_group(
+        ax, stations[StationColumns.LONGITUDE], stations[StationColumns.LATITUDE], labels[located]
+    )
+    ax.set(xlabel="Longitude", ylabel="Latitude", title="Station groups in Guadalajara")
+    ax.set_aspect("equal")
+    ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+    fig.tight_layout()
+    return fig
+
+
+def _scatter_by_group(ax: plt.Axes, x: pd.Series, y: pd.Series, labels: np.ndarray) -> None:
+    """Draw one scatter series per group, so each group gets its own legend entry."""
+    for group in np.unique(labels):
+        members = labels == group
+        ax.scatter(x[members], y[members], s=14, alpha=0.8, label=f"Group {group}")
+    ax.legend()

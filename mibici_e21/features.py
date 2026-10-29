@@ -6,7 +6,7 @@ from loguru import logger
 import pandas as pd
 
 from mibici_e21.config import DATA_LAKE_SETTINGS, FEATURE_STORE_SETTINGS
-from mibici_e21.schemas.columns import GoldColumns, TripColumns
+from mibici_e21.schemas.columns import GoldColumns, StationColumns, TripColumns
 
 
 def load_silver_trips(
@@ -180,6 +180,22 @@ def load_gold_demand(year: int, processed_dir: Path | None = None) -> pd.DataFra
     demand = pd.read_parquet(demand_path, engine="pyarrow")
     demand[GoldColumns.DATE] = pd.to_datetime(demand[GoldColumns.DATE])
     return demand
+
+
+def load_station_locations(raw_dir: Path | None = None) -> pd.DataFrame:
+    """Load the id, latitude, and longitude of every station from the station catalog.
+
+    - `raw_dir`: directory of the silver files. Defaults to `DATA_LAKE_SETTINGS.PROCESSED_DIR`.
+
+    The id column is renamed to `station_id`, to join with the gold demand. Raises
+    `FileNotFoundError` when the catalog is missing.
+    """
+    path = (raw_dir or DATA_LAKE_SETTINGS.PROCESSED_DIR) / "mibici-stations.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"No station catalog at {path}. Run `mlflow run . -e ingest`.")
+    columns = [StationColumns.ID, StationColumns.LATITUDE, StationColumns.LONGITUDE]
+    stations = pd.read_parquet(path, columns=columns, engine="pyarrow")
+    return stations.rename(columns={StationColumns.ID: GoldColumns.STATION_ID})
 
 
 def materialize_features_range(

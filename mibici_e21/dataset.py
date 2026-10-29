@@ -34,14 +34,18 @@ def download_dataset(
     revision: str = DATA_LAKE_SETTINGS.HF_DATASET_REVISION,
     output_dir: Path = DATA_LAKE_SETTINGS.PROCESSED_DIR,
 ) -> Path:
-    """Download the trip Parquet files of a pinned dataset revision into `output_dir`.
+    """Download trip Parquet files and the station catalog of a pinned dataset revision.
 
     - `years`: trip years to download. `None` downloads every Parquet file.
     - `repo_id`: Hugging Face dataset repository.
     - `revision`: dataset commit to download. Defaults to `HF_DATASET_REVISION`.
     - `output_dir`: destination directory. Defaults to `data/raw`.
     """
-    patterns = [trips_file_name(year) for year in years] if years else ["*.parquet"]
+    patterns = (
+        [STATIONS_FILE_NAME, *(trips_file_name(year) for year in years)]
+        if years
+        else ["*.parquet"]
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Downloading {patterns} from {repo_id}@{revision[:7]} into {output_dir}")
     snapshot_download(
@@ -52,6 +56,9 @@ def download_dataset(
         allow_patterns=patterns,
     )
     return output_dir
+
+
+STATIONS_FILE_NAME = "mibici-stations.parquet"
 
 
 def trips_file_name(year: int) -> str:
@@ -68,7 +75,8 @@ def build_data_manifest(year: int, files: dict[str, Path]) -> dict:
     """Describe the files of one ingestion so a run can prove which data it used.
 
     - `year`: trip year of the ingestion.
-    - `files`: layer name (`silver`, `gold_features`, `gold_demand`) mapped to its file.
+    - `files`: layer name (`stations`, `silver`, `gold_features`, `gold_demand`) mapped to
+      its file.
 
     Each file entry records its name, SHA-256, size, and row count. The manifest has no
     timestamps, so the same inputs always produce the same manifest.
@@ -110,6 +118,7 @@ def ingest_year(year: int) -> Path:
     manifest = build_data_manifest(
         year,
         {
+            "stations": DATA_LAKE_SETTINGS.PROCESSED_DIR / STATIONS_FILE_NAME,
             "silver": DATA_LAKE_SETTINGS.PROCESSED_DIR / trips_file_name(year),
             "gold_features": features_path,
             "gold_demand": demand_path,

@@ -44,6 +44,20 @@ format: ## Format the code with Ruff
 test: ## Run the unit tests with pytest
 	uv run pytest tests/ -v
 
+# DeepChecks runs in the isolated environment of validation/. Its own deprecation warnings
+# come from NumPy and pandas APIs it still uses, not from this project.
+VALIDATION_RUN = env -u VIRTUAL_ENV uv run --project validation
+DEEPCHECKS_WARNINGS = -W "ignore:pkg_resources is deprecated" \
+	-W "ignore:the \`interpolation=\` argument to quantile was renamed" \
+	-W "ignore:DataFrame.applymap has been deprecated"
+
+.PHONY: data-checks
+data-checks: ## Validate the training data with DeepChecks. Needs `make ingest` first
+	$(VALIDATION_RUN) pytest -v $(DEEPCHECKS_WARNINGS) tests/test_validation.py
+	$(VALIDATION_RUN) python $(DEEPCHECKS_WARNINGS) -m mibici_e21.validation
+
+check: data-checks
+
 create_environment: ## Create the virtual environment with uv
 	uv venv --python $(PYTHON_VERSION)
 	@echo ">>> New uv virtual environment created. Activate with:"

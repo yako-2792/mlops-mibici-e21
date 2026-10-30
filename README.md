@@ -33,6 +33,7 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [Quick start](#quick-start)
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
+- [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
 - [Git and GitHub workflow](#git-and-github-workflow)
@@ -241,6 +242,43 @@ predictions = model.predict(model.input_example)
 
 ---
 
+## Quality and security checks
+
+One command runs every check. It stops at the first one that fails:
+
+```bash
+make check
+```
+
+| Check | Command | What it verifies |
+| --- | --- | --- |
+| Lint | `make lint` | Ruff formatting and lint rules on `mibici_e21/` and `tests/` |
+| Tests | `make test` | Unit, reproducibility, and MLflow integration tests in `tests/` |
+
+### Tests
+
+The tests live in `tests/`, one file per module, and need no downloaded data or running server: they build small frames in memory and use a temporary SQLite store for MLflow.
+
+| File | What it covers |
+| --- | --- |
+| `test_extractor.py`, `test_transformer.py` | Ingestion: catalog discovery, downloads, missing months, and the PyArrow schema casts |
+| `test_features.py` | Data processing and feature engineering: cleaning rules, trip features, and station demand |
+| `test_dataset.py` | The data manifest (deterministic, rejects a changed gold file) and local data cleanup |
+| `test_modeling.py` | Baselines and their fallbacks, the temporal split, P2 features without label leakage, P3 profiles, model selection against the baseline, and CLI parsing |
+| `test_reproducibility.py` | Training twice with the configured seed gives the same predictions and metrics for every P1, P2, and P3 model, and a different seed changes the model |
+| `test_tracking.py` | The experiment guard of `mlflow run` and the tags, metrics, model, and artifacts of a training run |
+
+Run one file or one test while working on it:
+
+```bash
+uv run pytest tests/test_reproducibility.py
+uv run pytest tests/test_modeling.py -k baseline
+```
+
+**Reproducibility.** Every estimator takes its seed from `MODELING_SETTINGS.SEED`. `test_reproducibility.py` trains each model twice on a synthetic year and requires identical class predictions and numeric predictions and metrics equal up to a relative 1e-12. Forests train their trees in parallel, so their final average can differ in the last floating-point bit, and that tolerance absorbs only that. A second test changes only the seed and checks that the forest changes, which proves the seed reaches the estimator.
+
+---
+
 ## Makefile
 
 ### MLflow Project
@@ -324,12 +362,14 @@ make clean-all
 | --- | --- |
 | `make lint` | Check formatting and Ruff rules. |
 | `make format` | Apply Ruff fixes and format the code. |
-| `make test` | Run the unit tests with pytest. |
+| `make test` | Run the unit, reproducibility, and MLflow integration tests. |
+| `make check` | Run every quality, data, and security check. |
 
 ```bash
 make lint
 make format
 make test
+make check
 ```
 
 ### Setup
@@ -362,7 +402,7 @@ make test
 │   └── Machine Learning Canvas.pdf
 ├── reports
 │   └── figures             <- EDA figures written by plots.py
-├── tests                   <- unit tests of ingestion, features, and data cleanup
+├── tests                   <- unit, reproducibility, and MLflow integration tests
 └── mibici_e21
     ├── config.py           <- paths, data revision, tracking, and modeling settings
     ├── dataset.py          <- ingest entry point: pinned download, gold build, data manifest

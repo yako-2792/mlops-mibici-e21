@@ -21,7 +21,7 @@ SAVE_CSV ?= false
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -41,8 +41,12 @@ format: ## Format the code with Ruff
 	uv run ruff check --fix
 	uv run ruff format
 
-test: ## Run the unit tests with pytest
-	uv run pytest tests/ -v
+test: ## Run the unit, reproducibility, and MLflow integration tests with pytest
+	uv run pytest -v
+
+# Every quality, data, and security target adds itself as a prerequisite of `check`.
+check: ## Run every quality, data, and security check with one command
+check: lint test
 
 create_environment: ## Create the virtual environment with uv
 	uv venv --python $(PYTHON_VERSION)

@@ -4,7 +4,10 @@ Nothing runs on import. Entry points call `configure_tracking` once before they 
 """
 
 from pathlib import Path
-import subprocess
+import shutil
+
+# subprocess only runs git, with an absolute path and arguments fixed in this module.
+import subprocess  # nosec B404
 
 import mlflow
 from mlflow import MlflowClient
@@ -64,5 +67,15 @@ def log_data_manifest(manifest_path: Path) -> None:
 
 
 def _git(*args: str) -> str:
-    """Run a git command at the project root and return its stripped output."""
-    return subprocess.check_output(["git", *args], cwd=PROJ_ROOT, text=True).strip()
+    """Run a git command at the project root and return its stripped output.
+
+    git is resolved to an absolute path, so a different `git` earlier on `PATH` cannot run
+    in its place. Raises `RuntimeError` when git is not installed.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is required to record the commit of every run.")
+    command = [git, *args]
+    # No shell, an absolute executable, and arguments that never come from user input.
+    output = subprocess.check_output(command, cwd=PROJ_ROOT, text=True)  # nosec B603
+    return output.strip()

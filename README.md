@@ -33,6 +33,7 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [Quick start](#quick-start)
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
+- [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
 - [Git and GitHub workflow](#git-and-github-workflow)
@@ -241,6 +242,32 @@ predictions = model.predict(model.input_example)
 
 ---
 
+## Quality and security checks
+
+### Data validation with DeepChecks
+
+`make data-checks` validates the frames the models train on, built by the same `prepare` code, so it checks exactly what each model sees. It needs the gold files, so run `make ingest` first.
+
+```bash
+make data-checks
+```
+
+DeepChecks 0.19, its latest release, still uses APIs removed in NumPy 2, pandas 2.3, and scikit-learn 1.7. It therefore runs in its own locked environment, `validation/`, instead of downgrading the project. `uv run --project validation` builds that environment on first use.
+
+| Suite | Data | Gating checks | Monitoring checks |
+| --- | --- | --- | --- |
+| Integrity | P1 demand, P2 station-days, P3 station profiles | No missing values, no mixed data types, no duplicated rows, no single-value column, and no conflicting labels for P2 | Feature-feature correlation, outlier samples |
+| Train-test | P1 and P2, January to September against October to December | Feature, label, and multivariate drift below the DeepChecks default thresholds, no dates shared between periods, and no class that only appears in test for P2 | Categories first seen in test, samples repeated across periods |
+
+A gating check that fails or errors makes the command exit with status 1. Monitoring checks have no conditions: they are reported for review and never fail the run. `tests/test_validation.py` injects missing values, duplicated rows, a shifted label, and an unseen class into synthetic data, and checks that each one is caught.
+
+The HTML reports are written to `reports/data-validation/`, which is gitignored because each report weighs tens of megabytes. On the 2023 data every gate passes. The monitoring checks show two expected facts:
+
+- **New stations.** 59 stations, ids 328 to 388, first appear in October to December 2023: 16% of the test stations and 7% of the test rows. They come from the expansion of the network, and the models handle them with their unseen-station fallback.
+- **Repeated P1 samples.** 89% of the P1 test rows share their features with a training row, because station, hour, and weekday have few combinations. Their departures still differ, so this is not leakage.
+
+---
+
 ## Makefile
 
 ### MLflow Project
@@ -325,6 +352,7 @@ make clean-all
 | `make lint` | Check formatting and Ruff rules. |
 | `make format` | Apply Ruff fixes and format the code. |
 | `make test` | Run the unit tests with pytest. |
+| `make data-checks` | Validate the training data with DeepChecks. |
 
 ```bash
 make lint
@@ -362,12 +390,14 @@ make test
 │   └── Machine Learning Canvas.pdf
 ├── reports
 │   └── figures             <- EDA figures written by plots.py
-├── tests                   <- unit tests of ingestion, features, and data cleanup
+├── tests                   <- unit tests, plus DeepChecks gate tests run in validation/
+├── validation              <- locked environment for DeepChecks, which needs older NumPy and pandas
 └── mibici_e21
     ├── config.py           <- paths, data revision, tracking, and modeling settings
     ├── dataset.py          <- ingest entry point: pinned download, gold build, data manifest
     ├── features.py         <- clean silver trips, build and load gold features
     ├── tracking.py         <- MLflow setup and lineage tags shared by every entry point
+    ├── validation.py       <- DeepChecks integrity and train-test validation of the modeling data
     ├── plots.py            <- EDA figures into reports/figures
     ├── modeling
     │   ├── base.py         <- Question contract and temporal split

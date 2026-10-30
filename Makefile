@@ -44,6 +44,23 @@ format: ## Format the code with Ruff
 test: ## Run the unit tests with pytest
 	uv run pytest tests/ -v
 
+# Every uv.lock in this list that exists is audited.
+AUDITED_PROJECTS = . validation
+
+.PHONY: security-checks
+security-checks: ## Scan the code with bandit, audit locked dependencies, and test the repo hygiene
+	uv run bandit -r mibici_e21 --quiet
+	@for project in $(AUDITED_PROJECTS); do \
+		if [ -f $$project/uv.lock ]; then \
+			echo "pip-audit $$project/uv.lock"; \
+			uv export --project $$project --frozen --no-emit-project --format requirements.txt --quiet \
+				| uv run pip-audit --strict --disable-pip --requirement /dev/stdin || exit 1; \
+		fi; \
+	done
+	uv run pytest -v tests/test_security.py
+
+check: security-checks
+
 create_environment: ## Create the virtual environment with uv
 	uv venv --python $(PYTHON_VERSION)
 	@echo ">>> New uv virtual environment created. Activate with:"

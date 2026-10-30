@@ -195,3 +195,10 @@ cython_debug/
 mlruns/
 mlflow.db
 mlartifacts/
+
+# Serialized models live in the MLflow Model Registry, never in git
+models/*
+!models/.gitkeep
+*.pkl
+*.pickle
+*.joblib

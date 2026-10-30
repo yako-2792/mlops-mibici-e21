@@ -33,6 +33,7 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [Quick start](#quick-start)
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
+- [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
 - [Git and GitHub workflow](#git-and-github-workflow)
@@ -63,11 +64,13 @@ source .venv/bin/activate
 ```
 
 > [!IMPORTANT]
-> Uploading to Hugging Face reads `HF_TOKEN` from a `.env` file in the project root. `.env` is gitignored. The dataset id is `HF_DATASET_REPO` in `mibici_e21/config.py` (`yako2792/mibici-dataset`), not an environment variable.
+> Credentials and settings that change per machine live in a `.env` file at the project root, which is gitignored. Start from the template, which lists every variable without real values:
 >
 > ```bash
-> HF_TOKEN=hf_your_token_here
+> cp .env.example .env
 > ```
+>
+> Uploading to Hugging Face needs `HF_TOKEN`. The dataset id is `HF_DATASET_REPO` in `mibici_e21/config.py` (`yako2792/mibici-dataset`), not an environment variable.
 
 > [!TIP]
 > `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
@@ -241,6 +244,32 @@ predictions = model.predict(model.input_example)
 
 ---
 
+## Quality and security checks
+
+### Security checks
+
+```bash
+make security-checks
+```
+
+| Check | Tool | What it verifies |
+| --- | --- | --- |
+| Code analysis | `bandit -r mibici_e21` | Insecure patterns in the package code, such as shell injection, unsafe deserialization, or hard-coded secrets |
+| Dependency audit | `pip-audit` | Known vulnerabilities in the exact versions of every `uv.lock`, including the one of `validation/` when it exists |
+| Repository hygiene | `tests/test_security.py` | No token or private key in any commit of the git history, no data, `.env`, MLflow store, or serialized model tracked, `.gitignore` coverage of those paths, and no rider data in the gold layer |
+
+The first run found and fixed these issues:
+
+- **Vulnerable dependencies.** `mlflow 3.17.1` (CVE-2026-53995) and `certifi 2026.10.18` (PYSEC-2026-4320) were upgraded to their fixed versions, `3.17.2` and `2026.10.23`.
+- **Partial executable path.** `tracking.py` called `git` by name, so another `git` earlier on `PATH` could run instead (bandit B607). It now resolves the absolute path. The remaining `subprocess` findings (B404, B603) are marked `# nosec` in place: the call uses no shell and its arguments are fixed in the module.
+- **Serialized models.** `.gitignore` did not cover `models/` or `*.pkl`, `*.pickle`, and `*.joblib` files. Models belong in the MLflow Model Registry, so those paths are now ignored.
+
+**Credentials.** No secret is written in the code. `HF_TOKEN` and the MLflow variables come from the environment or from `.env`, and `.env.example` documents them without values.
+
+**Rider data.** The silver trip files contain a user id, gender, and birth year. They stay under `data/`, which is gitignored, and the gold layer drops those columns before any model or MLflow run sees the data. `test_security.py` checks both.
+
+---
+
 ## Makefile
 
 ### MLflow Project
@@ -325,6 +354,7 @@ make clean-all
 | `make lint` | Check formatting and Ruff rules. |
 | `make format` | Apply Ruff fixes and format the code. |
 | `make test` | Run the unit tests with pytest. |
+| `make security-checks` | Run bandit, pip-audit, and the repository hygiene tests. |
 
 ```bash
 make lint
@@ -348,6 +378,7 @@ make test
 ├── MLproject               <- MLflow Project: environment and the ingest, train, and register entry points
 ├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
+├── .env.example            <- every environment variable, without real values
 ├── pyproject.toml          <- dependencies, Ruff, and pytest configuration
 ├── uv.lock                 <- locked dependency versions
 ├── data

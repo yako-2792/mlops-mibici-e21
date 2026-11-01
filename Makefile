@@ -62,19 +62,18 @@ data-checks: ## Validate the training data with DeepChecks. Needs `make ingest` 
 
 check: data-checks
 
-# Every uv.lock in this list that exists is audited.
-AUDITED_PROJECTS = . validation
+LOCKED_REQUIREMENTS = uv export --frozen --no-emit-project --format requirements.txt --quiet
+PIP_AUDIT = uv run pip-audit --strict --disable-pip --requirement /dev/stdin
+# Accepted in validation/ only: both setuptools advisories need setuptools>=83, which removes
+# the pkg_resources module DeepChecks imports. They affect building source distributions on
+# macOS and legacy wheel installs on Windows, and that environment does neither.
+VALIDATION_AUDIT_EXCEPTIONS = --ignore-vuln PYSEC-2026-3447 --ignore-vuln GHSA-xmj3-9gf7-h52w
 
 .PHONY: security-checks
-security-checks: ## Scan the code with bandit, audit locked dependencies, and test the repo hygiene
+security-checks: ## Scan the code with bandit, audit both lockfiles, and test the repo hygiene
 	uv run bandit -r mibici_e21 --quiet
-	@for project in $(AUDITED_PROJECTS); do \
-		if [ -f $$project/uv.lock ]; then \
-			echo "pip-audit $$project/uv.lock"; \
-			uv export --project $$project --frozen --no-emit-project --format requirements.txt --quiet \
-				| uv run pip-audit --strict --disable-pip --requirement /dev/stdin || exit 1; \
-		fi; \
-	done
+	$(LOCKED_REQUIREMENTS) | $(PIP_AUDIT)
+	$(LOCKED_REQUIREMENTS) --project validation | $(PIP_AUDIT) $(VALIDATION_AUDIT_EXCEPTIONS)
 	uv run pytest -v tests/test_security.py
 
 check: security-checks

@@ -246,6 +246,65 @@ predictions = model.predict(model.input_example)
 
 ## Quality and security checks
 
+One command runs every check. It stops at the first one that fails:
+
+```bash
+make check
+```
+
+| Check | Command | What it verifies |
+| --- | --- | --- |
+| Lint | `make lint` | Ruff formatting and lint rules on `mibici_e21/` and `tests/` |
+| Tests | `make test` | Unit, reproducibility, and MLflow integration tests in `tests/` |
+| Data validation | `make data-checks` | DeepChecks integrity and train-test validation of the modeling data |
+| Security | `make security-checks` | bandit, pip-audit, and the repository hygiene tests |
+
+### Tests
+
+The tests live in `tests/`, one file per module, and need no downloaded data or running server: they build small frames in memory and use a temporary SQLite store for MLflow.
+
+| File | What it covers |
+| --- | --- |
+| `test_extractor.py`, `test_transformer.py` | Ingestion: catalog discovery, downloads, missing months, and the PyArrow schema casts |
+| `test_features.py` | Data processing and feature engineering: cleaning rules, trip features, and station demand |
+| `test_dataset.py` | The data manifest (deterministic, rejects a changed gold file) and local data cleanup |
+| `test_modeling.py` | Baselines and their fallbacks, the temporal split, P2 features without label leakage, P3 profiles, model selection against the baseline, and CLI parsing |
+| `test_reproducibility.py` | Training twice with the configured seed gives the same predictions and metrics for every P1, P2, and P3 model, and a different seed changes the model |
+| `test_tracking.py` | The experiment guard of `mlflow run` and the tags, metrics, model, and artifacts of a training run |
+| `test_security.py` | No secret in the git history, no data, `.env`, MLflow store, or model tracked, and no rider data in gold. See [Security checks](#security-checks) |
+| `test_validation.py` | The DeepChecks gates catch injected defects. It runs in `validation/` with `make data-checks`, as described below, and is skipped by `make test` |
+
+Run one file or one test while working on it:
+
+```bash
+uv run pytest tests/test_reproducibility.py
+uv run pytest tests/test_modeling.py -k baseline
+```
+
+**Reproducibility.** Every estimator takes its seed from `MODELING_SETTINGS.SEED`. `test_reproducibility.py` trains each model twice on a synthetic year and requires identical class predictions and numeric predictions and metrics equal up to a relative 1e-12. Forests train their trees in parallel, so their final average can differ in the last floating-point bit, and that tolerance absorbs only that. A second test changes only the seed and checks that the forest changes, which proves the seed reaches the estimator.
+
+### Data validation with DeepChecks
+
+`make data-checks` validates the frames the models train on, built by the same `prepare` code, so it checks exactly what each model sees. It needs the gold files, so run `make ingest` first.
+
+```bash
+make data-checks
+```
+
+DeepChecks 0.19, its latest release, still uses APIs removed in NumPy 2, pandas 2.3, and scikit-learn 1.7. It therefore runs in its own locked environment, `validation/`, instead of downgrading the project. `uv run --project validation` builds that environment on first use.
+
+| Suite | Data | Gating checks | Monitoring checks |
+| --- | --- | --- | --- |
+| Integrity | P1 demand, P2 station-days, P3 station profiles | No missing values, no mixed data types, no duplicated rows, no single-value column, and no conflicting labels for P2 | Feature-feature correlation, outlier samples |
+| Train-test | P1 and P2, January to September against October to December | Feature, label, and multivariate drift below the DeepChecks default thresholds, no dates shared between periods, and no class that only appears in test for P2 | Categories first seen in test, samples repeated across periods |
+
+A gating check that fails or errors makes the command exit with status 1. Monitoring checks have no conditions: they are reported for review and never fail the run. `tests/test_validation.py` injects missing values, duplicated rows, a shifted label, and an unseen class into synthetic data, and checks that each one is caught.
+
+The HTML reports are written to `reports/data-validation/`, which is gitignored because each report weighs tens of megabytes. On the 2023 data every gate passes. The monitoring checks show two expected facts:
+
+- **New stations.** 59 stations, ids 328 to 388, first appear in October to December 2023: 16% of the test stations and 7% of the test rows. They come from the expansion of the network, and the models handle them with their unseen-station fallback.
+- **Repeated P1 samples.** 89% of the P1 test rows share their features with a training row, because station, hour, and weekday have few combinations. Their departures still differ, so this is not leakage.
+
 ### Security checks
 
 ```bash
@@ -255,7 +314,7 @@ make security-checks
 | Check | Tool | What it verifies |
 | --- | --- | --- |
 | Code analysis | `bandit -r mibici_e21` | Insecure patterns in the package code, such as shell injection, unsafe deserialization, or hard-coded secrets |
-| Dependency audit | `pip-audit` | Known vulnerabilities in the exact versions of every `uv.lock`, including the one of `validation/` when it exists |
+| Dependency audit | `pip-audit` | Known vulnerabilities in the exact versions of both `uv.lock` files: the project and `validation/` |
 | Repository hygiene | `tests/test_security.py` | No token or private key in any commit of the git history, no data, `.env`, MLflow store, or serialized model tracked, `.gitignore` coverage of those paths, and no rider data in the gold layer |
 
 The first run found and fixed these issues:
@@ -353,13 +412,16 @@ make clean-all
 | --- | --- |
 | `make lint` | Check formatting and Ruff rules. |
 | `make format` | Apply Ruff fixes and format the code. |
-| `make test` | Run the unit tests with pytest. |
+| `make test` | Run the unit, reproducibility, and MLflow integration tests. |
+| `make data-checks` | Validate the training data with DeepChecks. |
 | `make security-checks` | Run bandit, pip-audit, and the repository hygiene tests. |
+| `make check` | Run every quality, data, and security check. |
 
 ```bash
 make lint
 make format
 make test
+make check
 ```
 
 ### Setup
@@ -393,12 +455,14 @@ make test
 │   └── Machine Learning Canvas.pdf
 ├── reports
 │   └── figures             <- EDA figures written by plots.py
-├── tests                   <- unit tests of ingestion, features, and data cleanup
+├── tests                   <- unit, reproducibility, and MLflow integration tests, plus DeepChecks gate tests
+├── validation              <- locked environment for DeepChecks, which needs older NumPy and pandas
 └── mibici_e21
     ├── config.py           <- paths, data revision, tracking, and modeling settings
     ├── dataset.py          <- ingest entry point: pinned download, gold build, data manifest
     ├── features.py         <- clean silver trips, build and load gold features
     ├── tracking.py         <- MLflow setup and lineage tags shared by every entry point
+    ├── validation.py       <- DeepChecks integrity and train-test validation of the modeling data
     ├── plots.py            <- EDA figures into reports/figures
     ├── modeling
     │   ├── base.py         <- Question contract and temporal split

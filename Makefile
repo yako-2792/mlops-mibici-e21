@@ -21,7 +21,7 @@ SAVE_CSV ?= false
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -41,8 +41,26 @@ format: ## Format the code with Ruff
 	uv run ruff check --fix
 	uv run ruff format
 
-test: ## Run the unit tests with pytest
-	uv run pytest tests/ -v
+test: ## Run the unit, reproducibility, and MLflow integration tests with pytest
+	uv run pytest -v
+
+# Every quality, data, and security target adds itself as a prerequisite of `check`.
+check: ## Run every quality, data, and security check with one command
+check: lint test
+
+# DeepChecks runs in the isolated environment of validation/. Its own deprecation warnings
+# come from NumPy and pandas APIs it still uses, not from this project.
+VALIDATION_RUN = env -u VIRTUAL_ENV uv run --project validation
+DEEPCHECKS_WARNINGS = -W "ignore:pkg_resources is deprecated" \
+	-W "ignore:the \`interpolation=\` argument to quantile was renamed" \
+	-W "ignore:DataFrame.applymap has been deprecated"
+
+.PHONY: data-checks
+data-checks: ## Validate the training data with DeepChecks. Needs `make ingest` first
+	$(VALIDATION_RUN) pytest -v $(DEEPCHECKS_WARNINGS) tests/test_validation.py
+	$(VALIDATION_RUN) python $(DEEPCHECKS_WARNINGS) -m mibici_e21.validation
+
+check: data-checks
 
 # Every uv.lock in this list that exists is audited.
 AUDITED_PROJECTS = . validation

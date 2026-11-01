@@ -37,6 +37,12 @@ package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
+# Deprecations raised inside MLflow's own code, not in this project.
+filterwarnings = [
+    "ignore:The ``noload`` loader strategy is deprecated",
+    "ignore:Starting with pandas version 4.0 all arguments",
+]
 
 [dependency-groups]
 dev = [

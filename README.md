@@ -319,7 +319,8 @@ make security-checks
 
 The first run found and fixed these issues:
 
-- **Vulnerable dependencies.** `mlflow 3.17.1` (CVE-2026-53995) and `certifi 2026.10.18` (PYSEC-2026-4320) were upgraded to their fixed versions, `3.17.2` and `2026.10.23`.
+- **Vulnerable dependencies.** `mlflow 3.17.1` (CVE-2026-53995), `certifi 2026.10.18` (PYSEC-2026-4320), and `pyasn1 0.6.4` (four CVEs) were upgraded to their fixed versions in the project lock. In `validation/`, `pyarrow 19.0.1` (CVE-2026-25087) moved to `23.0.1`, which still works with the NumPy 1.x that DeepChecks needs.
+- **Accepted exceptions.** Two `setuptools` advisories in `validation/` (PYSEC-2026-3447, GHSA-xmj3-9gf7-h52w) are ignored by name in the `Makefile`, only for that lockfile. Their fixes need `setuptools>=83`, which removes the `pkg_resources` module DeepChecks imports. One affects building source distributions on macOS and the other legacy wheel installs on Windows, and that environment does neither: uv installs the packages and DeepChecks only parses version strings. Any new advisory still fails the audit.
 - **Partial executable path.** `tracking.py` called `git` by name, so another `git` earlier on `PATH` could run instead (bandit B607). It now resolves the absolute path. The remaining `subprocess` findings (B404, B603) are marked `# nosec` in place: the call uses no shell and its arguments are fixed in the module.
 - **Serialized models.** `.gitignore` did not cover `models/` or `*.pkl`, `*.pickle`, and `*.joblib` files. Models belong in the MLflow Model Registry, so those paths are now ignored.
 

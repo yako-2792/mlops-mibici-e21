@@ -337,6 +337,18 @@ Runs on `main` after the tests, DeepChecks, and security pull requests were merg
 
 ![make data-checks: five gate tests pass and every DeepChecks suite passes](docs/evidence/data-checks.png)
 
+The full DeepChecks reports of that run are in `docs/evidence/data-validation/`, one per suite:
+
+| Report | Open in the browser | File |
+| --- | --- | --- |
+| P1 demand integrity | [View](https://yako-2792.github.io/mlops-mibici-e21/evidence/data-validation/p1_integrity.html) | [`p1_integrity.html`](docs/evidence/data-validation/p1_integrity.html) |
+| P1 train-test drift and leakage, including the 59 new stations | [View](https://yako-2792.github.io/mlops-mibici-e21/evidence/data-validation/p1_train_test.html) | [`p1_train_test.html`](docs/evidence/data-validation/p1_train_test.html) |
+| P2 station-day integrity | [View](https://yako-2792.github.io/mlops-mibici-e21/evidence/data-validation/p2_integrity.html) | [`p2_integrity.html`](docs/evidence/data-validation/p2_integrity.html) |
+| P2 train-test drift, leakage, and new labels | [View](https://yako-2792.github.io/mlops-mibici-e21/evidence/data-validation/p2_train_test.html) | [`p2_train_test.html`](docs/evidence/data-validation/p2_train_test.html) |
+| P3 station profile integrity | [View](https://yako-2792.github.io/mlops-mibici-e21/evidence/data-validation/p3_integrity.html) | [`p3_integrity.html`](docs/evidence/data-validation/p3_integrity.html) |
+
+GitHub shows an HTML file as source code, so the **View** links serve the reports through GitHub Pages, published from `docs/`. The file links download the same report to open locally. Each report is self-contained and works offline.
+
 **Security** (`make security-checks`): bandit reports no issue, both lockfiles have no known vulnerability apart from the two documented setuptools exceptions, and the ten repository security tests pass.
 
 ![make security-checks: bandit, both pip-audit runs, and ten security tests pass](docs/evidence/security-checks.png)

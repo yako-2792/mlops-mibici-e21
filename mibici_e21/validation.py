@@ -15,6 +15,8 @@ exit status 1. Monitoring checks carry no conditions: they appear in the HTML re
 """
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
 import sys
 
 from deepchecks.core import SuiteResult
@@ -47,6 +49,7 @@ from mibici_e21.schemas.columns import GoldColumns
 
 REPORT_DIR = REPORTS_DIR / "data-validation"
 LABEL_TYPES = {"regression": "regression", "classification": "multiclass"}
+PLOTLY_BUNDLE = re.compile(r"<script>/\*\*\n?\s*\* plotly\.js v[\d.]+.*?</script>", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,20 @@ def gating_failures(result: SuiteResult) -> tuple[str, ...]:
     return tuple(check_result.check.name() for check_result in results)
 
 
+def save_report(result: SuiteResult, path: Path) -> None:
+    """Write a self-contained HTML report that embeds plotly.js once.
+
+    DeepChecks embeds the full plotly.js library, about 5 MB, in every check that draws a
+    chart. Later copies are identical, so they are removed: the charts render the same and
+    a train-test report shrinks from about 48 MB to 10 MB.
+    """
+    html = result.html_serializer.serialize(full_html=True)
+    first = PLOTLY_BUNDLE.search(html)
+    if first is not None:
+        html = html[: first.end()] + PLOTLY_BUNDLE.sub("", html[first.end() :])
+    path.write_text(html, encoding="utf-8")
+
+
 def validate_question(question: Question, gold: pd.DataFrame, year: int) -> list[SuiteOutcome]:
     """Run the suites of one question, write their HTML reports, and return their outcomes."""
     frame = question.prepare(gold)
@@ -152,7 +169,7 @@ def validate_question(question: Question, gold: pd.DataFrame, year: int) -> list
     outcomes = []
     for name, suite, datasets in runs:
         result = suite.run(*datasets)
-        result.save_as_html(str(REPORT_DIR / f"{name}.html"), as_widget=False)
+        save_report(result, REPORT_DIR / f"{name}.html")
         outcomes.append(SuiteOutcome(name=name, failed_checks=gating_failures(result)))
     return outcomes
 

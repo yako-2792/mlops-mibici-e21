@@ -64,11 +64,13 @@ source .venv/bin/activate
 ```
 
 > [!IMPORTANT]
-> Uploading to Hugging Face reads `HF_TOKEN` from a `.env` file in the project root. `.env` is gitignored. The dataset id is `HF_DATASET_REPO` in `mibici_e21/config.py` (`yako2792/mibici-dataset`), not an environment variable.
+> Credentials and settings that change per machine live in a `.env` file at the project root, which is gitignored. Start from the template, which lists every variable without real values:
 >
 > ```bash
-> HF_TOKEN=hf_your_token_here
+> cp .env.example .env
 > ```
+>
+> Uploading to Hugging Face needs `HF_TOKEN`. The dataset id is `HF_DATASET_REPO` in `mibici_e21/config.py` (`yako2792/mibici-dataset`), not an environment variable.
 
 > [!TIP]
 > `make help` lists every command. Ingestion writes Parquet locally. `HF` defaults to `false`, so a run does not upload until you pass `HF=true`.
@@ -255,6 +257,7 @@ make check
 | Lint | `make lint` | Ruff formatting and lint rules on `mibici_e21/` and `tests/` |
 | Tests | `make test` | Unit, reproducibility, and MLflow integration tests in `tests/` |
 | Data validation | `make data-checks` | DeepChecks integrity and train-test validation of the modeling data |
+| Security | `make security-checks` | bandit, pip-audit, and the repository hygiene tests |
 
 ### Tests
 
@@ -268,6 +271,7 @@ The tests live in `tests/`, one file per module, and need no downloaded data or 
 | `test_modeling.py` | Baselines and their fallbacks, the temporal split, P2 features without label leakage, P3 profiles, model selection against the baseline, and CLI parsing |
 | `test_reproducibility.py` | Training twice with the configured seed gives the same predictions and metrics for every P1, P2, and P3 model, and a different seed changes the model |
 | `test_tracking.py` | The experiment guard of `mlflow run` and the tags, metrics, model, and artifacts of a training run |
+| `test_security.py` | No secret in the git history, no data, `.env`, MLflow store, or model tracked, and no rider data in gold. See [Security checks](#security-checks) |
 | `test_validation.py` | The DeepChecks gates catch injected defects. It runs in `validation/` with `make data-checks`, as described below, and is skipped by `make test` |
 
 Run one file or one test while working on it:
@@ -300,6 +304,29 @@ The HTML reports are written to `reports/data-validation/`, which is gitignored 
 
 - **New stations.** 59 stations, ids 328 to 388, first appear in October to December 2023: 16% of the test stations and 7% of the test rows. They come from the expansion of the network, and the models handle them with their unseen-station fallback.
 - **Repeated P1 samples.** 89% of the P1 test rows share their features with a training row, because station, hour, and weekday have few combinations. Their departures still differ, so this is not leakage.
+
+### Security checks
+
+```bash
+make security-checks
+```
+
+| Check | Tool | What it verifies |
+| --- | --- | --- |
+| Code analysis | `bandit -r mibici_e21` | Insecure patterns in the package code, such as shell injection, unsafe deserialization, or hard-coded secrets |
+| Dependency audit | `pip-audit` | Known vulnerabilities in the exact versions of both `uv.lock` files: the project and `validation/` |
+| Repository hygiene | `tests/test_security.py` | No token or private key in any commit of the git history, no data, `.env`, MLflow store, or serialized model tracked, `.gitignore` coverage of those paths, and no rider data in the gold layer |
+
+The first run found and fixed these issues:
+
+- **Vulnerable dependencies.** `mlflow 3.17.1` (CVE-2026-53995), `certifi 2026.10.18` (PYSEC-2026-4320), and `pyasn1 0.6.4` (four CVEs) were upgraded to their fixed versions in the project lock. In `validation/`, `pyarrow 19.0.1` (CVE-2026-25087) moved to `23.0.1`, which still works with the NumPy 1.x that DeepChecks needs.
+- **Accepted exceptions.** Two `setuptools` advisories in `validation/` (PYSEC-2026-3447, GHSA-xmj3-9gf7-h52w) are ignored by name in the `Makefile`, only for that lockfile. Their fixes need `setuptools>=83`, which removes the `pkg_resources` module DeepChecks imports. One affects building source distributions on macOS and the other legacy wheel installs on Windows, and that environment does neither: uv installs the packages and DeepChecks only parses version strings. Any new advisory still fails the audit.
+- **Partial executable path.** `tracking.py` called `git` by name, so another `git` earlier on `PATH` could run instead (bandit B607). It now resolves the absolute path. The remaining `subprocess` findings (B404, B603) are marked `# nosec` in place: the call uses no shell and its arguments are fixed in the module.
+- **Serialized models.** `.gitignore` did not cover `models/` or `*.pkl`, `*.pickle`, and `*.joblib` files. Models belong in the MLflow Model Registry, so those paths are now ignored.
+
+**Credentials.** No secret is written in the code. `HF_TOKEN` and the MLflow variables come from the environment or from `.env`, and `.env.example` documents them without values.
+
+**Rider data.** The silver trip files contain a user id, gender, and birth year. They stay under `data/`, which is gitignored, and the gold layer drops those columns before any model or MLflow run sees the data. `test_security.py` checks both.
 
 ---
 
@@ -388,6 +415,7 @@ make clean-all
 | `make format` | Apply Ruff fixes and format the code. |
 | `make test` | Run the unit, reproducibility, and MLflow integration tests. |
 | `make data-checks` | Validate the training data with DeepChecks. |
+| `make security-checks` | Run bandit, pip-audit, and the repository hygiene tests. |
 | `make check` | Run every quality, data, and security check. |
 
 ```bash
@@ -413,6 +441,7 @@ make check
 ├── MLproject               <- MLflow Project: environment and the ingest, train, and register entry points
 ├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
+├── .env.example            <- every environment variable, without real values
 ├── pyproject.toml          <- dependencies, Ruff, and pytest configuration
 ├── uv.lock                 <- locked dependency versions
 ├── data

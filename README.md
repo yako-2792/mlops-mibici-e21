@@ -244,6 +244,41 @@ predictions = model.predict(model.input_example)
 
 ## Quality and security checks
 
+One command runs every check. It stops at the first one that fails:
+
+```bash
+make check
+```
+
+| Check | Command | What it verifies |
+| --- | --- | --- |
+| Lint | `make lint` | Ruff formatting and lint rules on `mibici_e21/` and `tests/` |
+| Tests | `make test` | Unit, reproducibility, and MLflow integration tests in `tests/` |
+| Data validation | `make data-checks` | DeepChecks integrity and train-test validation of the modeling data |
+
+### Tests
+
+The tests live in `tests/`, one file per module, and need no downloaded data or running server: they build small frames in memory and use a temporary SQLite store for MLflow.
+
+| File | What it covers |
+| --- | --- |
+| `test_extractor.py`, `test_transformer.py` | Ingestion: catalog discovery, downloads, missing months, and the PyArrow schema casts |
+| `test_features.py` | Data processing and feature engineering: cleaning rules, trip features, and station demand |
+| `test_dataset.py` | The data manifest (deterministic, rejects a changed gold file) and local data cleanup |
+| `test_modeling.py` | Baselines and their fallbacks, the temporal split, P2 features without label leakage, P3 profiles, model selection against the baseline, and CLI parsing |
+| `test_reproducibility.py` | Training twice with the configured seed gives the same predictions and metrics for every P1, P2, and P3 model, and a different seed changes the model |
+| `test_tracking.py` | The experiment guard of `mlflow run` and the tags, metrics, model, and artifacts of a training run |
+| `test_validation.py` | The DeepChecks gates catch injected defects. It runs in `validation/` with `make data-checks`, as described below, and is skipped by `make test` |
+
+Run one file or one test while working on it:
+
+```bash
+uv run pytest tests/test_reproducibility.py
+uv run pytest tests/test_modeling.py -k baseline
+```
+
+**Reproducibility.** Every estimator takes its seed from `MODELING_SETTINGS.SEED`. `test_reproducibility.py` trains each model twice on a synthetic year and requires identical class predictions and numeric predictions and metrics equal up to a relative 1e-12. Forests train their trees in parallel, so their final average can differ in the last floating-point bit, and that tolerance absorbs only that. A second test changes only the seed and checks that the forest changes, which proves the seed reaches the estimator.
+
 ### Data validation with DeepChecks
 
 `make data-checks` validates the frames the models train on, built by the same `prepare` code, so it checks exactly what each model sees. It needs the gold files, so run `make ingest` first.
@@ -351,13 +386,15 @@ make clean-all
 | --- | --- |
 | `make lint` | Check formatting and Ruff rules. |
 | `make format` | Apply Ruff fixes and format the code. |
-| `make test` | Run the unit tests with pytest. |
+| `make test` | Run the unit, reproducibility, and MLflow integration tests. |
 | `make data-checks` | Validate the training data with DeepChecks. |
+| `make check` | Run every quality, data, and security check. |
 
 ```bash
 make lint
 make format
 make test
+make check
 ```
 
 ### Setup
@@ -390,7 +427,7 @@ make test
 │   └── Machine Learning Canvas.pdf
 ├── reports
 │   └── figures             <- EDA figures written by plots.py
-├── tests                   <- unit tests, plus DeepChecks gate tests run in validation/
+├── tests                   <- unit, reproducibility, and MLflow integration tests, plus DeepChecks gate tests
 ├── validation              <- locked environment for DeepChecks, which needs older NumPy and pandas
 └── mibici_e21
     ├── config.py           <- paths, data revision, tracking, and modeling settings

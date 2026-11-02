@@ -328,6 +328,19 @@ The first run found and fixed these issues:
 
 **Rider data.** The silver trip files contain a user id, gender, and birth year. They stay under `data/`, which is gitignored, and the gold layer drops those columns before any model or MLflow run sees the data. `test_security.py` checks both.
 
+
+### Evidence
+
+Runs on `main` after the tests, DeepChecks, and security pull requests were merged (#9, #10, #11).
+
+**Data validation** (`make data-checks`): the five DeepChecks gate tests pass, and every integrity and train-test suite passes on the 2023 data.
+
+![make data-checks: five gate tests pass and every DeepChecks suite passes](docs/evidence/data-checks.png)
+
+**Security** (`make security-checks`): bandit reports no issue, both lockfiles have no known vulnerability apart from the two documented setuptools exceptions, and the ten repository security tests pass.
+
+![make security-checks: bandit, both pip-audit runs, and ten security tests pass](docs/evidence/security-checks.png)
+
 ---
 
 ## Makefile
@@ -453,6 +466,7 @@ make check
 ├── docs
 │   ├── data-pipeline.md    <- data source, ingestion, storage, versioning, and gold processing
 │   ├── testing-e2e-flow.md <- clean clone to champion predictions, step by step
+│   ├── evidence            <- screenshots of the quality and security checks
 │   └── Machine Learning Canvas.pdf
 ├── reports
 │   └── figures             <- EDA figures written by plots.py

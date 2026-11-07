@@ -59,3 +59,24 @@ make predict YEAR=2024 SAVE_CSV=true
 ```
 
 `predict` loads the `@champion` version of each question and writes `predictions_p1_2024.parquet` (`predicted_departures`), `predictions_p2_2024.parquet` (`predicted_risk`), and `predictions_p3_2024.parquet` (`predicted_group`) to `data/processed/`. `SAVE_CSV=true` also writes CSV copies.
+
+## 7. Serve the P1 champion
+
+With the tracking server still running, export the champion and build the image. The tracking server can stop once the export finishes:
+
+```bash
+make export-model Q=p1
+make image
+make serve
+```
+
+In another terminal:
+
+```bash
+curl -s localhost:8000/model
+curl -s -X POST localhost:8000/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"instances": [{"station_id": 42, "hour": 8, "day_of_week": 0}]}'
+```
+
+Expect `/model` to report the version in `models/p1-demanda/registry.json` and `/predict` to return one `predicted_departures` per instance. The README section [Model serving](../README.md#model-serving) covers Podman, the registry alternative, and the validation rules.

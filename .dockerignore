@@ -1,0 +1,6 @@
+*
+!pyproject.toml
+!uv.lock
+!api/
+!models/p1-demanda/
+**/__pycache__/

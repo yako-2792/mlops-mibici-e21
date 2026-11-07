@@ -14,6 +14,10 @@ MLFLOW_EXPERIMENT_NAME := $(call TRACKING_SETTING,EXPERIMENT_NAME)
 endif
 export MLFLOW_TRACKING_URI MLFLOW_EXPERIMENT_NAME
 HF ?= false
+CONTAINER ?= docker
+API_IMAGE = mibici-api
+API_MODEL_DIR = models/p1-demanda
+API_TAG = $(if $(wildcard $(API_MODEL_DIR)/registry.json),p1-v$(shell uv run --quiet python -c "import json; print(json.load(open('$(API_MODEL_DIR)/registry.json'))['version'])"))
 PUSH_TO_HF = $(if $(filter true,$(HF)),True,False)
 SAVE_CSV ?= false
 
@@ -21,7 +25,7 @@ SAVE_CSV ?= false
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register export-model predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register export-model api image serve predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -147,6 +151,16 @@ register: ## Promote the best candidate of a question to champion. Usage: make r
 export-model: ## Export a registered model into models/. Usage: make export-model Q=p1 [ALIAS=challenger | VERSION=3]
 	@if [ -z "$(Q)" ]; then echo "Error: Q is required. Example: make export-model Q=p1"; exit 1; fi
 	uv run python -m mibici_e21.modeling.export --question $(Q) $(if $(VERSION),--version $(VERSION),$(if $(ALIAS),--alias $(ALIAS)))
+
+api: ## Run the API locally with the exported P1 model on port 8000
+	uv run uvicorn api.main:app --port 8000
+
+image: ## Build the API image from the exported P1 model. Usage: make image [CONTAINER=podman]
+	@if [ -z "$(API_TAG)" ]; then echo "Error: export the model first: make export-model Q=p1"; exit 1; fi
+	$(CONTAINER) build -f Containerfile -t $(API_IMAGE):$(API_TAG) -t $(API_IMAGE):latest .
+
+serve: ## Run the API image on port 8000. Usage: make serve [CONTAINER=podman]
+	$(CONTAINER) run --rm --name $(API_IMAGE) -p 8000:8000 $(API_IMAGE):latest
 
 predict: ## Score a year with the champion models. Usage: make predict YEAR=2024 SAVE_CSV=true
 	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1; fi

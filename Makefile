@@ -71,7 +71,7 @@ VALIDATION_AUDIT_EXCEPTIONS = --ignore-vuln PYSEC-2026-3447 --ignore-vuln GHSA-x
 
 .PHONY: security-checks
 security-checks: ## Scan the code with bandit, audit both lockfiles, and test the repo hygiene
-	uv run bandit -r mibici_e21 --quiet
+	uv run bandit -r api mibici_e21 --quiet
 	$(LOCKED_REQUIREMENTS) | $(PIP_AUDIT)
 	$(LOCKED_REQUIREMENTS) --project validation | $(PIP_AUDIT) $(VALIDATION_AUDIT_EXCEPTIONS)
 	uv run pytest -v tests/test_security.py

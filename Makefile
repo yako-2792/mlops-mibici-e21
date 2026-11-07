@@ -21,7 +21,7 @@ SAVE_CSV ?= false
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register export-model predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -143,6 +143,10 @@ train: ## Train through the MLflow Project. Usage: make train Q=p1 MODEL=rf PARA
 register: ## Promote the best candidate of a question to champion. Usage: make register Q=p1
 	@if [ -z "$(Q)" ]; then echo "Error: Q is required. Example: make register Q=p1"; exit 1; fi
 	$(MLFLOW_RUN) -e register -P question=$(Q) $(PARAMS)
+
+export-model: ## Export a registered model into models/. Usage: make export-model Q=p1 [ALIAS=challenger | VERSION=3]
+	@if [ -z "$(Q)" ]; then echo "Error: Q is required. Example: make export-model Q=p1"; exit 1; fi
+	uv run python -m mibici_e21.modeling.export --question $(Q) $(if $(VERSION),--version $(VERSION),$(if $(ALIAS),--alias $(ALIAS)))
 
 predict: ## Score a year with the champion models. Usage: make predict YEAR=2024 SAVE_CSV=true
 	@if [ -z "$(YEAR)" ]; then echo "Error: YEAR is required. Example: make predict YEAR=2024 SAVE_CSV=true"; exit 1; fi

@@ -16,6 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "fastapi>=0.146.0",
     "huggingface-hub>=2.2.0",
     "loguru>=0.7.3",
     "matplotlib>=3.11.2",
@@ -27,6 +28,7 @@ dependencies = [
     "requests>=2.34.2",
     "scikit-learn>=1.9.1",
     "seaborn>=0.13.2",
+    "uvicorn>=0.54.0",
 ]
 requires-python = "~=3.11.0"
 
@@ -42,11 +44,13 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore:The ``noload`` loader strategy is deprecated",
     "ignore:Starting with pandas version 4.0 all arguments",
+    "ignore:Hint. Inferred schema contains integer column",
 ]
 
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
+    "httpx>=0.28.1",
     "pip-audit>=2.10.1",
     "pytest>=9.1.1",
     "ruff>=0.17.1",
@@ -55,13 +59,13 @@ dev = [
 
 [tool.ruff]
 line-length = 99
-src = ["mibici_e21"]
-include = ["pyproject.toml", "mibici_e21/**/*.py", "tests/**/*.py"]
+src = ["api", "mibici_e21"]
+include = ["pyproject.toml", "api/**/*.py", "mibici_e21/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
 
 [tool.ruff.lint.isort]
-known-first-party = ["mibici_e21"]
+known-first-party = ["api", "mibici_e21"]
 force-sort-within-sections = true
 

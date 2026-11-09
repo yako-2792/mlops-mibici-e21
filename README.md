@@ -33,6 +33,7 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [Quick start](#quick-start)
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
+- [Model serving](#model-serving)
 - [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
@@ -244,6 +245,140 @@ predictions = model.predict(model.input_example)
 
 ---
 
+## Model serving
+
+The P1 champion is served as a REST API built with FastAPI and packaged in an OCI image that runs with Docker or Podman. The image holds the model, so the container needs no MLflow server, dataset, or network access to answer.
+
+### Deployment strategy
+
+**Real-time inference for P1, batch for P2 and P3.** The demand model answers a question an operator or an app asks on the spot: how many bikes will leave station X at hour Y. Its inputs, the station, the hour, and the weekday, are known when the request arrives, so it is served as a synchronous endpoint with the model loaded once in memory. P2 needs the balance of earlier days and P3 needs yearly totals, which only exist after the data is aggregated, so both keep running as batch jobs with `make predict`.
+
+**The model is baked into the image.** The export resolves `@champion` to its version, and the image is tagged with that version, such as `mibici-api:p1-v1`. An image always serves the same model, it starts without reaching the registry, and a rollback is running the previous tag. Promoting a new champion means exporting and building again.
+
+### 1. Export the model
+
+With the tracking server running and a P1 champion registered (see [Model Registry and lifecycle](#model-registry-and-lifecycle)):
+
+```bash
+make export-model Q=p1
+```
+
+The export resolves `models:/mibici-equipo21-p1-demanda@champion` to its version and downloads that version into `models/p1-demanda/`. It replaces any earlier export and writes the lineage to `registry.json`:
+
+```json
+{
+  "name": "mibici-equipo21-p1-demanda",
+  "version": "1",
+  "alias": "champion",
+  "run_id": "40459163c3744f7891c8b2cd2726caee",
+  "exported_at": "2026-11-07T20:12:09+00:00"
+}
+```
+
+`ALIAS=challenger` exports another alias, and `VERSION=3` pins a version. `models/` is gitignored, so the model never reaches git and every clone exports it before building the image.
+
+> [!NOTE]
+> The P1 champion, a random forest of 200 trees with depth 20, weighs 816 MB on disk. The image is 2.4 GB and the running container uses about 1.1 GB of memory. The challenger is a lighter alternative if that becomes a constraint.
+
+### 2. Build the image
+
+```bash
+make image                      # docker build -f Containerfile -t mibici-api:p1-v1 -t mibici-api:latest .
+make image CONTAINER=podman     # the same build with Podman
+```
+
+The `Containerfile` installs the dependencies from `uv.lock` with `uv sync --frozen`. The model is a pickle, so it must load with the same Python, scikit-learn, and NumPy versions it was trained with, and the lockfile guarantees them. The build context is limited by `.dockerignore` to `pyproject.toml`, `uv.lock`, `api/`, and `models/p1-demanda/`, so data, the MLflow store, and `.env` never enter the image. The container runs as a non-root user and declares a health check against `/health`.
+
+> [!IMPORTANT]
+> On Linux, Docker needs your user in the `docker` group: `sudo usermod -aG docker $USER`, then open a new session. Podman runs rootless and needs no group.
+
+### 3. Run the container
+
+```bash
+make serve                      # docker run --rm --name mibici-api -p 8000:8000 mibici-api:latest
+make serve CONTAINER=podman
+```
+
+The model loads in a few seconds, and `docker ps` then shows the container as `healthy`. `make api` runs the same application locally with uvicorn, without a container.
+
+To load the model from the registry when the container starts instead of from the image, set `MODEL_URI` to a registry URI. The registry stores artifact locations as absolute paths of the host, so the tracking server must listen beyond loopback (`--host 0.0.0.0`) and the container must mount `mlartifacts/` at the same path:
+
+```bash
+docker run --rm -p 8000:8000 \
+  --add-host=host.docker.internal:host-gateway \
+  -e MLFLOW_TRACKING_URI=http://host.docker.internal:5000 \
+  -e MODEL_URI=models:/mibici-equipo21-p1-demanda@champion \
+  -v "$PWD/mlartifacts:$PWD/mlartifacts:ro" \
+  mibici-api:latest
+```
+
+Podman resolves `host.containers.internal` without `--add-host`.
+
+### 4. Call the API
+
+| Endpoint | What it returns |
+| --- | --- |
+| `GET /health` | `{"status": "ok", "model_version": "1"}` once the model is loaded |
+| `GET /model` | Name, version, alias, and run of the served model |
+| `POST /predict` | Expected departures for 1 to 1,000 station-hours |
+| `GET /docs` | Interactive Swagger documentation |
+
+Request:
+
+```bash
+curl -s -X POST localhost:8000/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"instances": [
+        {"station_id": 42, "hour": 8, "day_of_week": 0},
+        {"station_id": 42, "hour": 18, "day_of_week": 5}
+      ]}'
+```
+
+Response:
+
+```json
+{
+  "model_name": "mibici-equipo21-p1-demanda",
+  "model_version": "1",
+  "predictions": [
+    {"station_id": 42, "hour": 8, "day_of_week": 0, "predicted_departures": 1.9935399731578791},
+    {"station_id": 42, "hour": 18, "day_of_week": 5, "predicted_departures": 3.286098720056013}
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `station_id` | Integer greater than 0. Stations missing from training still get a prediction. |
+| `hour` | Integer from 0 to 23 |
+| `day_of_week` | Integer from 0 to 6, Monday is 0 |
+
+Inputs are strict: a number sent as a string, a float, a boolean, a missing field, or an unknown field is rejected with a 422 that names the field. `is_weekend` is not accepted, because the service derives it from `day_of_week` as the training features did. For example, `"hour": 25` returns:
+
+```json
+{
+  "detail": [
+    {
+      "type": "less_than_equal",
+      "loc": ["body", "instances", 0, "hour"],
+      "msg": "Input should be less than or equal to 23",
+      "input": 25,
+      "ctx": {"le": 23}
+    }
+  ]
+}
+```
+
+The output is validated as well: a prediction that is negative, infinite, or missing returns a 500 instead of a wrong number. Before predicting, the service casts each column to the type of the model signature, because MLflow rejects an int64 column where the model was trained on int32.
+
+### Evidence
+
+The API answering from the container built with Docker:
+
+![docker ps shows the container healthy, and curl calls to /model and /predict return the served version and its predictions](docs/evidence/api-container.png)
+
+---
+
 ## Quality and security checks
 
 One command runs every check. It stops at the first one that fails:
@@ -254,8 +389,8 @@ make check
 
 | Check | Command | What it verifies |
 | --- | --- | --- |
-| Lint | `make lint` | Ruff formatting and lint rules on `mibici_e21/` and `tests/` |
-| Tests | `make test` | Unit, reproducibility, and MLflow integration tests in `tests/` |
+| Lint | `make lint` | Ruff formatting and lint rules on `api/`, `mibici_e21/`, and `tests/` |
+| Tests | `make test` | Unit, reproducibility, MLflow integration, and API tests in `tests/` |
 | Data validation | `make data-checks` | DeepChecks integrity and train-test validation of the modeling data |
 | Security | `make security-checks` | bandit, pip-audit, and the repository hygiene tests |
 
@@ -271,6 +406,8 @@ The tests live in `tests/`, one file per module, and need no downloaded data or 
 | `test_modeling.py` | Baselines and their fallbacks, the temporal split, P2 features without label leakage, P3 profiles, model selection against the baseline, and CLI parsing |
 | `test_reproducibility.py` | Training twice with the configured seed gives the same predictions and metrics for every P1, P2, and P3 model, and a different seed changes the model |
 | `test_tracking.py` | The experiment guard of `mlflow run` and the tags, metrics, model, and artifacts of a training run |
+| `test_export.py` | Exporting from a temporary registry: alias resolution, pinned versions, `registry.json`, and replacement of an earlier export |
+| `test_api.py` | The API against models saved like an export: predictions and version, the derived `is_weekend`, every rejected input, invalid model output, and a model with other columns |
 | `test_security.py` | No secret in the git history, no data, `.env`, MLflow store, or model tracked, and no rider data in gold. See [Security checks](#security-checks) |
 | `test_validation.py` | The DeepChecks gates catch injected defects. It runs in `validation/` with `make data-checks`, as described below, and is skipped by `make test` |
 
@@ -313,7 +450,7 @@ make security-checks
 
 | Check | Tool | What it verifies |
 | --- | --- | --- |
-| Code analysis | `bandit -r mibici_e21` | Insecure patterns in the package code, such as shell injection, unsafe deserialization, or hard-coded secrets |
+| Code analysis | `bandit -r api mibici_e21` | Insecure patterns in the API and package code, such as shell injection, unsafe deserialization, or hard-coded secrets |
 | Dependency audit | `pip-audit` | Known vulnerabilities in the exact versions of both `uv.lock` files: the project and `validation/` |
 | Repository hygiene | `tests/test_security.py` | No token or private key in any commit of the git history, no data, `.env`, MLflow store, or serialized model tracked, `.gitignore` coverage of those paths, and no rider data in the gold layer |
 
@@ -356,6 +493,17 @@ These targets wrap `mlflow run` with `--env-manager uv`. They export `MLFLOW_TRA
 | `make train Q=p1 MODEL=rf PARAMS="-P n_estimators=200 -P max_depth=20"` | Run the `train` entry point. |
 | `make register Q=p1` | Run the `register` entry point. |
 | `make predict YEAR=2024 SAVE_CSV=true` | Score a year with the three champions. |
+
+### Model serving
+
+`CONTAINER` defaults to `docker`. Pass `CONTAINER=podman` to use Podman.
+
+| Command | What it does |
+| --- | --- |
+| `make export-model Q=p1` | Download the `champion` of a question into `models/`. `ALIAS=` or `VERSION=` pick another one. |
+| `make api` | Run the API locally on port 8000 with the exported P1 model. |
+| `make image` | Build `mibici-api:p1-v<version>` and `mibici-api:latest` from the exported P1 model. |
+| `make serve` | Run `mibici-api:latest` on port 8000. |
 
 ### Ingestion
 
@@ -450,7 +598,9 @@ make check
 ## Project organization
 
 ```text
-├── Makefile                <- MLflow Project targets, ingestion, features, clean, lint, and test
+├── Makefile                <- MLflow Project targets, ingestion, features, serving, clean, lint, and test
+├── Containerfile           <- image of the API with the exported P1 model
+├── .dockerignore           <- limits the build context to the API, the lockfile, and the model
 ├── MLproject               <- MLflow Project: environment and the ingest, train, and register entry points
 ├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
@@ -466,12 +616,17 @@ make check
 ├── docs
 │   ├── data-pipeline.md    <- data source, ingestion, storage, versioning, and gold processing
 │   ├── testing-e2e-flow.md <- clean clone to champion predictions, step by step
-│   ├── evidence            <- screenshots of the quality and security checks
+│   ├── evidence            <- screenshots of the quality, security, and API checks
 │   └── Machine Learning Canvas.pdf
+├── models                  <- models exported from the registry, gitignored
 ├── reports
 │   └── figures             <- EDA figures written by plots.py
 ├── tests                   <- unit, reproducibility, and MLflow integration tests, plus DeepChecks gate tests
 ├── validation              <- locked environment for DeepChecks, which needs older NumPy and pandas
+├── api
+│   ├── main.py             <- FastAPI application: /health, /model, and /predict
+│   ├── schemas.py          <- Pydantic contracts of requests and responses
+│   └── model.py            <- loads the served model and builds its input frame
 └── mibici_e21
     ├── config.py           <- paths, data revision, tracking, and modeling settings
     ├── dataset.py          <- ingest entry point: pinned download, gold build, data manifest
@@ -489,6 +644,7 @@ make check
     │   ├── runs.py         <- MLflow logging of training runs and nested searches
     │   ├── train.py        <- train entry point
     │   ├── register.py     <- register entry point: champion and challenger aliases
+    │   ├── export.py       <- download a registered version into models/ for the image
     │   └── predict.py      <- batch inference with the champion models
     ├── schemas
     │   ├── columns.py      <- trip, station, and gold column names

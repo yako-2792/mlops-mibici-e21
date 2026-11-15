@@ -20,12 +20,13 @@ API_MODEL_DIR = models/p1-demanda
 API_TAG = $(if $(wildcard $(API_MODEL_DIR)/registry.json),p1-v$(shell uv run --quiet python -c "import json; print(json.load(open('$(API_MODEL_DIR)/registry.json'))['version'])"))
 PUSH_TO_HF = $(if $(filter true,$(HF)),True,False)
 SAVE_CSV ?= false
+PROMOTE ?= false
 
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register export-model api image serve predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
+.PHONY: help requirements clean lint format test check create_environment check-hf ingest-stations ingest-trips ingest-trips-range download-data materialize-yearly-features materialize-features-range mlflow-server ingest train register drift retrain ab-test export-model api image serve predict clean-temp clean-raw clean-interim clean-processed clean-external clean-all
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-32s\033[0m %s\n", $$1, $$2}'
@@ -147,6 +148,19 @@ train: ## Train through the MLflow Project. Usage: make train Q=p1 MODEL=rf PARA
 register: ## Promote the best candidate of a question to champion. Usage: make register Q=p1
 	@if [ -z "$(Q)" ]; then echo "Error: Q is required. Example: make register Q=p1"; exit 1; fi
 	$(MLFLOW_RUN) -e register -P question=$(Q) $(PARAMS)
+
+drift: ## Compare the 2024 P1 data with the training data using Evidently and log the report
+	$(MLFLOW_RUN) -e drift
+
+retrain: ## Retrain the P1 champion recipe on 2023-2024 and register it as challenger. Usage: make retrain [PARAMS="-P max_depth=14"]
+	$(MLFLOW_RUN) -e retrain $(PARAMS)
+
+ab-test: ## A/B test the P1 champion and challenger on Oct-Dec 2024. Usage: make ab-test [PROMOTE=true]
+	@case "$(PROMOTE)" in \
+		true|false) ;; \
+		*) echo "Error: PROMOTE must be true or false. Example: make ab-test PROMOTE=true"; exit 1 ;; \
+	esac
+	$(MLFLOW_RUN) -e ab_test -P promote=$(PROMOTE)
 
 export-model: ## Export a registered model into models/. Usage: make export-model Q=p1 [ALIAS=challenger | VERSION=3]
 	@if [ -z "$(Q)" ]; then echo "Error: Q is required. Example: make export-model Q=p1"; exit 1; fi

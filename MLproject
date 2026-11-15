@@ -28,3 +28,22 @@ entry_points:
       question: {type: string}
       run_id: {type: string, default: ""}
     command: "python -m mibici_e21.modeling.register --question {question} --run_id {run_id}"
+
+  drift:
+    command: "python -m mibici_e21.monitoring.drift"
+
+  retrain:
+    parameters:
+      model: {type: string, default: ""}
+      n_estimators: {type: string, default: ""}
+      max_depth: {type: string, default: ""}
+    command: >
+      python -m mibici_e21.monitoring.retrain
+      --model {model}
+      --n_estimators {n_estimators}
+      --max_depth {max_depth}
+
+  ab_test:
+    parameters:
+      promote: {type: string, default: "false"}
+    command: "python -m mibici_e21.monitoring.ab_test --promote {promote}"

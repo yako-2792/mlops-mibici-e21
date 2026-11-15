@@ -34,6 +34,7 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
 - [Model serving](#model-serving)
+- [Monitoring and A/B testing](#monitoring-and-ab-testing)
 - [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
 - [Project organization](#project-organization)
@@ -105,13 +106,16 @@ export MLFLOW_EXPERIMENT_NAME=mibici-equipo21
 
 ### 3. Entry points
 
-`MLproject` declares the environment (`python_env.yaml`, pinned to the same versions as `uv.lock`) and three entry points. The year, split dates, seed, and search grids live only in `mibici_e21/config.py`, so no entry point repeats them.
+`MLproject` declares the environment (`python_env.yaml`, pinned to the same versions as `uv.lock`) and six entry points. The year, split dates, seed, and search grids live only in `mibici_e21/config.py`, so no entry point repeats them.
 
 | Entry point | Parameters | What it does |
 | --- | --- | --- |
 | `ingest` | none | Downloads the training year and the station catalog from a pinned Hugging Face revision, builds the gold files, and logs the data manifest. |
 | `train` | `question` (`p1`, `p2`, `p3`), `model`, `n_estimators`, `max_depth`, `n_clusters`, `search` | Trains one model, or runs a nested search with `search=true`, and logs it. |
 | `register` | `question`, optional `run_id` | Promotes the best candidate that beats the baseline to `@champion`. |
+| `drift` | none | Compares the 2024 P1 data with the champion's training data using Evidently. See [Monitoring and A/B testing](#monitoring-and-ab-testing). |
+| `retrain` | optional `override_model`, `override_n_estimators`, `override_max_depth` | Retrains the P1 champion recipe on Jan 2023 - Sep 2024 and registers it as `@challenger`. |
+| `ab_test` | `promote` (`false`) | Compares `@champion` and `@challenger` on Oct-Dec 2024. With `promote=true`, a winning challenger becomes champion. |
 
 Models by question:
 
@@ -229,6 +233,8 @@ Each question has one registered model with a description:
 1. MLflow deprecated stages (`Staging`, `Production`) in favor of aliases, so new code should not depend on them.
 2. An alias is a movable pointer. Promoting a model or rolling it back is one reassignment, and consumers keep loading the same URI, `models:/<name>@champion`.
 3. `challenger` keeps the next best version registered and ready to compare or swap in, which stages only modeled loosely.
+
+`make retrain` also sets `challenger`: on P1 it points at the version retrained on newer data, which `make ab-test` compares against `champion`. See [Monitoring and A/B testing](#monitoring-and-ab-testing).
 
 `register` promotes a candidate only when it beats the latest baseline of its question on the selection metric, so production never regresses below the baseline. It reuses the version of a run that is already registered, and it records the lineage as version tags: `experiment`, `source_run_id`, `source_run_name`, `git_commit`, `dataset_revision`, `model_family`, `selection_metric`, `selection_value`, `baseline_run_id`, and `baseline_value`. To promote a specific candidate, for example a cheaper one with a similar score, pass `-P run_id=<run id>`.
 
@@ -379,6 +385,101 @@ The API answering from the container built with Docker:
 
 ---
 
+## Monitoring and A/B testing
+
+The P1 model is watched for data drift with [Evidently](https://docs.evidentlyai.com/), retrained on newer data, and compared against the production version before anything is promoted. Three entry points cover the loop: `drift`, `retrain`, and `ab_test`.
+
+### Periods
+
+Every period lives in `MonitoringSettings` of `mibici_e21/config.py`, so the report, the model, and the comparison use the same dates. Missing years are ingested from the pinned dataset revision on first use.
+
+| Period | Dates | Rows | Role |
+| --- | --- | ---: | --- |
+| Reference | 2023-01-01 to 2023-09-30 | 1,192,179 | Data the champion (v1) was fitted on |
+| Current | 2024-01-01 to 2024-12-31 | 1,874,405 | Production period compared for drift |
+| Retraining | 2023-01-01 to 2024-09-30 | 3,023,238 | Data the challenger (v2) is fitted on, validated on Jul-Sep 2024 |
+| Evaluation | 2024-10-01 to 2024-12-31 | 471,003 | A/B test, unseen by both versions |
+
+2024 is the next full year with the same schema, and its last quarter matches the season of the champion's test set (Oct-Dec 2023), so the comparison does not mix seasonality.
+
+### Run it
+
+With the tracking server running (`make mlflow-server`):
+
+```bash
+make drift      # Evidently report of 2024 against the training data
+make retrain    # v2: champion recipe on Jan 2023 - Sep 2024, registered as @challenger
+make ab-test    # v1 @champion against v2 @challenger on Oct-Dec 2024
+make ab-test PROMOTE=true   # same, and swap the aliases when v2 wins
+```
+
+Each command logs one MLflow run, tagged `stage_of_work=monitoring`, `retrain`, or `ab_test`. The outputs go to the gitignored `reports/monitoring/`, and a copy of the evidence run lives in [docs/evidence/monitoring](docs/evidence/monitoring).
+
+### Data drift
+
+`drift` compares the reference and current periods on the four inputs and the target. The methods are fixed, so a column drifts for the same reason at any sample size: the normed Wasserstein distance for numeric columns and the Jensen-Shannon distance for categorical ones, both against a threshold of 0.1. The report also covers data quality: there are no missing values, empty, constant, or duplicated columns on either side.
+
+| Column | Type | Method | Score | Drift |
+| --- | --- | --- | ---: | --- |
+| `station_id` | categorical | Jensen-Shannon | 0.228 | **Yes** |
+| `departures_count` (target) | numeric | Wasserstein (normed) | 0.071 | No |
+| `hour` | numeric | Wasserstein (normed) | 0.004 | No |
+| `day_of_week` | categorical | Jensen-Shannon | 0.003 | No |
+| `is_weekend` | categorical | Jensen-Shannon | 0.000 | No |
+
+Only `station_id` drifts, and the cause is the network itself: 2024 has 370 stations against 300 in the reference, so 14.1% of the 2024 rows come from 70 stations the champion never saw. The random forest reads `station_id` as a number, so it scores a new station as if it were the stations with nearby ids. The calendar columns cannot drift, since every year has the same mix of hours and days, and the target moves a little (mean departures per row 2.69 to 2.47) because demand spread over more stations. Quarter by quarter, the `station_id` score grows from 0.221 to 0.235 and the share of unseen rows from 13.3% to 14.7%.
+
+![Drift score per column and share of rows from unseen stations, per quarter of 2024](docs/evidence/monitoring/p1_drift_by_quarter.png)
+
+### A/B test
+
+`retrain` copies the champion's model and hyperparameters from the registry (random forest, 200 trees, depth 20) and only widens the data, so the test measures the effect of retraining. The new version is registered as v2 with the `challenger` alias, and `champion` stays on v1.
+
+`ab_test` loads both versions by alias, pins them to their version numbers, and scores every row of the evaluation period:
+
+| Oct-Dec 2024 | A: v1 `@champion` | B: v2 `@challenger` | B - A |
+| --- | ---: | ---: | ---: |
+| MAE, all rows | 1.318 | **1.228** | -0.090 (-6.8%) |
+| RMSE | 1.920 | **1.796** | -0.124 |
+| R2 | 0.558 | **0.614** | +0.055 |
+| MAE, known stations (401,789 rows) | 1.359 | **1.299** | -0.061 |
+| MAE, new stations (69,214 rows) | 1.080 | **0.819** | -0.262 |
+| R2, new stations | -0.187 | **0.333** | +0.520 |
+| MAE, peak hours | 1.587 | **1.443** | -0.143 |
+| MAE, weekends | 1.104 | **1.059** | -0.045 |
+| Prediction time, 471,003 rows | 0.53 s | 0.66 s | +0.13 s |
+| Model size | 855 MB | 1,024 MB | +169 MB |
+
+- **Significance.** A paired bootstrap resamples the 92 days 1,000 times. The 95% interval of MAE(B) - MAE(A) is [-0.096, -0.084], and B wins in every resample. Days are the unit because the rows of one day share weather and events.
+- **Traffic split.** A router that sends each station to A or B by a hash of its id would serve 188 stations with v1 (MAE 1.263) and 180 with v2 (MAE 1.286). The served MAE alone looks worse for B, but v2 also beats v1 on group A (1.170 against 1.263) and on group B (1.286 against 1.373). Group B simply holds harder stations. This is why the decision uses the paired comparison on the same rows.
+- **Decision.** The rule was fixed before the test: B wins when the whole interval is below zero and it does not raise the MAE of the known stations by more than 0.02. Both hold, so **v2 should become the champion**. `make ab-test PROMOTE=true` swaps the aliases. The trade-off is a 20% larger model in the API image.
+
+![MAE per week of v1 and v2 on the evaluation period](docs/evidence/monitoring/p1_ab_test_weekly_mae.png)
+
+### Continuous training
+
+Retrain P1 when any of these holds on the monthly `make drift`:
+
+1. Rows from stations unseen in training exceed 5% of a month.
+2. The `station_id` drift score passes 0.1.
+3. The monthly MAE rises more than 5% over the test MAE of the champion.
+
+The first rule alone would have fired every quarter of 2024. The retrained candidate then goes through `make ab-test` and is promoted only when it wins.
+
+### Evidence
+
+| File | What it shows |
+| --- | --- |
+| [p1_drift_report.html](docs/evidence/monitoring/p1_drift_report.html) | Full Evidently report. Download it and open it in a browser, since GitHub shows HTML as source. |
+| [evidently_drift_summary.png](docs/evidence/monitoring/evidently_drift_summary.png) | Drift per column in Evidently |
+| [evidently_station_id.png](docs/evidence/monitoring/evidently_station_id.png) | Distribution of `station_id`, reference against current |
+| [evidently_data_quality.png](docs/evidence/monitoring/evidently_data_quality.png) | Data quality summary of both periods |
+| [mlflow_registry_versions.png](docs/evidence/monitoring/mlflow_registry_versions.png) | Registry with v1 `@champion` and v2 `@challenger` |
+| [p1_ab_test_bootstrap.png](docs/evidence/monitoring/p1_ab_test_bootstrap.png) | Bootstrap distribution of the MAE difference |
+| [p1_ab_test_metrics.csv](docs/evidence/monitoring/p1_ab_test_metrics.csv), [p1_ab_test_summary.json](docs/evidence/monitoring/p1_ab_test_summary.json) | Every A/B metric by segment, and the decision |
+
+---
+
 ## Quality and security checks
 
 One command runs every check. It stops at the first one that fails:
@@ -493,6 +594,9 @@ These targets wrap `mlflow run` with `--env-manager uv`. They export `MLFLOW_TRA
 | `make train Q=p1 MODEL=rf PARAMS="-P n_estimators=200 -P max_depth=20"` | Run the `train` entry point. |
 | `make register Q=p1` | Run the `register` entry point. |
 | `make predict YEAR=2024 SAVE_CSV=true` | Score a year with the three champions. |
+| `make drift` | Run the `drift` entry point. |
+| `make retrain [PARAMS="-P override_max_depth=14"]` | Run the `retrain` entry point. |
+| `make ab-test [PROMOTE=true]` | Run the `ab_test` entry point. |
 
 ### Model serving
 
@@ -601,7 +705,7 @@ make check
 ├── Makefile                <- MLflow Project targets, ingestion, features, serving, clean, lint, and test
 ├── Containerfile           <- image of the API with the exported P1 model
 ├── .dockerignore           <- limits the build context to the API, the lockfile, and the model
-├── MLproject               <- MLflow Project: environment and the ingest, train, and register entry points
+├── MLproject               <- MLflow Project: environment and the ingest, train, register, drift, retrain, and ab_test entry points
 ├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
 ├── .env.example            <- every environment variable, without real values
@@ -616,11 +720,12 @@ make check
 ├── docs
 │   ├── data-pipeline.md    <- data source, ingestion, storage, versioning, and gold processing
 │   ├── testing-e2e-flow.md <- clean clone to champion predictions, step by step
-│   ├── evidence            <- screenshots of the quality, security, and API checks
+│   ├── evidence            <- screenshots of the quality, security, and API checks, and the monitoring evidence
 │   └── Machine Learning Canvas.pdf
 ├── models                  <- models exported from the registry, gitignored
 ├── reports
-│   └── figures             <- EDA figures written by plots.py
+│   ├── figures             <- EDA figures written by plots.py
+│   └── monitoring          <- Evidently report and A/B test outputs, gitignored
 ├── tests                   <- unit, reproducibility, and MLflow integration tests, plus DeepChecks gate tests
 ├── validation              <- locked environment for DeepChecks, which needs older NumPy and pandas
 ├── api
@@ -646,6 +751,11 @@ make check
     │   ├── register.py     <- register entry point: champion and challenger aliases
     │   ├── export.py       <- download a registered version into models/ for the image
     │   └── predict.py      <- batch inference with the champion models
+    ├── monitoring
+    │   ├── periods.py      <- reference, current, retraining, and evaluation periods
+    │   ├── drift.py        <- drift entry point: Evidently report of the P1 data
+    │   ├── retrain.py      <- retrain entry point: P1 challenger on a wider window
+    │   └── ab_test.py      <- ab_test entry point: champion against challenger
     ├── schemas
     │   ├── columns.py      <- trip, station, and gold column names
     │   ├── trips.py        <- TRIPS PyArrow schema

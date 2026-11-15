@@ -1,6 +1,0 @@
-column,kind,method,score,threshold,drifted
-station_id,categorical,jensenshannon,0.22815693007877252,0.1,True
-departures_count,numeric,wasserstein,0.07069235853413591,0.1,False
-hour,numeric,wasserstein,0.003907023658932785,0.1,False
-day_of_week,categorical,jensenshannon,0.0026699918400096404,0.1,False
-is_weekend,categorical,jensenshannon,0.0004686525756613948,0.1,False

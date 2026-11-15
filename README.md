@@ -476,7 +476,7 @@ The first rule alone would have fired every quarter of 2024. The retrained candi
 | [evidently_data_quality.png](docs/evidence/monitoring/evidently_data_quality.png) | Data quality summary of both periods |
 | [mlflow_registry_versions.png](docs/evidence/monitoring/mlflow_registry_versions.png) | Registry with v1 `@champion` and v2 `@challenger` |
 | [p1_ab_test_bootstrap.png](docs/evidence/monitoring/p1_ab_test_bootstrap.png) | Bootstrap distribution of the MAE difference |
-| [p1_ab_test_metrics.csv](docs/evidence/monitoring/p1_ab_test_metrics.csv), [p1_ab_test_summary.json](docs/evidence/monitoring/p1_ab_test_summary.json) | Every A/B metric by segment, and the decision |
+| [p1_ab_test_summary.json](docs/evidence/monitoring/p1_ab_test_summary.json) | Versions, bootstrap interval, decision, prediction time, and model size of the A/B test. `make ab-test` also writes every metric by segment to `reports/monitoring/p1_ab_test_metrics.csv`. |
 
 ---
 

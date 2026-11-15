@@ -16,6 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "evidently>=0.7.23",
     "fastapi>=0.146.0",
     "huggingface-hub>=2.2.0",
     "loguru>=0.7.3",
@@ -45,6 +46,9 @@ filterwarnings = [
     "ignore:The ``noload`` loader strategy is deprecated",
     "ignore:Starting with pandas version 4.0 all arguments",
     "ignore:Hint. Inferred schema contains integer column",
+    # Deprecations raised inside Evidently and its Litestar dependency.
+    "ignore:numpy.core is deprecated:DeprecationWarning",
+    "ignore::DeprecationWarning:litestar",
 ]
 
 [dependency-groups]

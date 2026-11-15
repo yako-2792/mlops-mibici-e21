@@ -152,7 +152,7 @@ register: ## Promote the best candidate of a question to champion. Usage: make r
 drift: ## Compare the 2024 P1 data with the training data using Evidently and log the report
 	$(MLFLOW_RUN) -e drift
 
-retrain: ## Retrain the P1 champion recipe on 2023-2024 and register it as challenger. Usage: make retrain [PARAMS="-P max_depth=14"]
+retrain: ## Retrain the P1 champion recipe on 2023-2024 and register it as challenger. Usage: make retrain [PARAMS="-P override_max_depth=14"]
 	$(MLFLOW_RUN) -e retrain $(PARAMS)
 
 ab-test: ## A/B test the P1 champion and challenger on Oct-Dec 2024. Usage: make ab-test [PROMOTE=true]

@@ -3,10 +3,12 @@
 This is the `retrain` entry point of the MLflow Project:
 
     mlflow run . -e retrain
-    mlflow run . -e retrain -P n_estimators=400 -P max_depth=14
+    mlflow run . -e retrain -P override_n_estimators=400 -P override_max_depth=14
 
 The alternative version repeats the champion's model and hyperparameters, read from the
-registry, unless they are passed. Only the data changes: it is fitted on `RETRAIN`, the
+registry, unless they are passed. The entry point names them `override_*`, because
+`mlflow run` logs its parameters to the run and the run then logs the resolved `model`,
+`n_estimators`, and `max_depth`, which MLflow does not let change. Only the data changes: it is fitted on `RETRAIN`, the
 reference plus the first months of the current period, so the A/B test measures the effect
 of retraining and nothing else.
 

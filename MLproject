@@ -34,14 +34,14 @@ entry_points:
 
   retrain:
     parameters:
-      model: {type: string, default: ""}
-      n_estimators: {type: string, default: ""}
-      max_depth: {type: string, default: ""}
+      override_model: {type: string, default: ""}
+      override_n_estimators: {type: string, default: ""}
+      override_max_depth: {type: string, default: ""}
     command: >
       python -m mibici_e21.monitoring.retrain
-      --model {model}
-      --n_estimators {n_estimators}
-      --max_depth {max_depth}
+      --model {override_model}
+      --n_estimators {override_n_estimators}
+      --max_depth {override_max_depth}
 
   ab_test:
     parameters:

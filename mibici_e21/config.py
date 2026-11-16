@@ -5,6 +5,7 @@ file. `huggingface_hub` reads `HF_TOKEN` from the environment when it uploads.
 """
 
 from dataclasses import dataclass
+from datetime import date
 import os
 from pathlib import Path
 
@@ -141,6 +142,44 @@ class RegistrySettings:
 
 
 REGISTRY_SETTINGS = RegistrySettings()
+
+
+# Monitoring config
+@dataclass(frozen=True)
+class MonitoringSettings:
+    """Periods and thresholds of the P1 drift report, the retraining, and the A/B test.
+
+    Every period is half open: it starts on its first date and stops before its second.
+
+    - `REFERENCE`: data the P1 champion was fitted on, `train_full` of `TRAINING_YEAR`.
+    - `CURRENT`: production period compared against the reference for drift.
+    - `RETRAIN`: data the alternative version is fitted on, the reference plus the first
+      nine months of the current period.
+    - `RETRAIN_VAL_START`: first day of the retraining validation. The alternative version
+      is scored there before its final fit on the whole `RETRAIN` period.
+    - `EVALUATION`: A/B test period. Neither version trains on it.
+    - `DRIFT_THRESHOLD`: distance from which a column counts as drifted. Numeric columns
+      use the normed Wasserstein distance and categorical columns the Jensen-Shannon one.
+    - `BOOTSTRAP_SAMPLES`: resamples of days in the paired bootstrap of the A/B test.
+    - `CONFIDENCE`: level of the bootstrap interval of the MAE difference.
+    - `KNOWN_STATION_TOLERANCE`: largest MAE increase, in departures per hour, that the
+      challenger may show on the stations the champion already knew and still win.
+    - `REPORTS_DIR`: directory of the HTML, JSON, CSV, and figures, `reports/monitoring`.
+    """
+
+    REFERENCE: tuple[date, date] = (date(2023, 1, 1), date(2023, 10, 1))
+    CURRENT: tuple[date, date] = (date(2024, 1, 1), date(2025, 1, 1))
+    RETRAIN: tuple[date, date] = (date(2023, 1, 1), date(2024, 10, 1))
+    RETRAIN_VAL_START: date = date(2024, 7, 1)
+    EVALUATION: tuple[date, date] = (date(2024, 10, 1), date(2025, 1, 1))
+    DRIFT_THRESHOLD: float = 0.1
+    BOOTSTRAP_SAMPLES: int = 1000
+    CONFIDENCE: float = 0.95
+    KNOWN_STATION_TOLERANCE: float = 0.02
+    REPORTS_DIR: Path = REPORTS_DIR / "monitoring"
+
+
+MONITORING_SETTINGS = MonitoringSettings()
 
 
 # Predict config

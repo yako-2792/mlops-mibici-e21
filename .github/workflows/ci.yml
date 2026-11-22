@@ -1,0 +1,40 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.5"
+          enable-cache: true
+
+      - name: Set up Python 3.11 and sync dependencies
+        run: |
+          uv python install 3.11
+          uv sync --frozen
+
+      - name: Run linter (Ruff)
+        run: make lint
+
+      - name: Run unit and integration tests (pytest)
+        run: make test
+
+      - name: Prepare model directory for container build
+        run: |
+          mkdir -p models/p1-demanda
+          echo '{"version": "ci"}' > models/p1-demanda/registry.json
+
+      - name: Build API container image
+        run: make image

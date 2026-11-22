@@ -1,0 +1,28 @@
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mibici-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlflow.db:/mlflow/mlflow.db
+      - ./mlartifacts:/mlflow/mlartifacts
+    working_dir: /mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root ./mlartifacts
+  api:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: mibici-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MODEL_URI=/app/model
+    depends_on:
+      - mlflow

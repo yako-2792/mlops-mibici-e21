@@ -33,7 +33,8 @@ Demand forecasting, station risk classification, and station clustering for the 
 - [Quick start](#quick-start)
 - [MLflow Project and tracking](#mlflow-project-and-tracking)
 - [Model Registry and lifecycle](#model-registry-and-lifecycle)
-- [Model serving](#model-serving)
+- [Model serving and container orchestration](#model-serving-and-container-orchestration)
+- [Load testing and CI/CD](#load-testing-and-cicd)
 - [Monitoring and A/B testing](#monitoring-and-ab-testing)
 - [Quality and security checks](#quality-and-security-checks)
 - [Makefile](#makefile)
@@ -50,6 +51,7 @@ The pipeline downloads the monthly CSVs from the MiBici open-data portal (bronze
 | --- | --- |
 | [docs/data-pipeline.md](docs/data-pipeline.md) | Data source, ingestion and schemas, storage and versioning, cleaning and gold features, and the handoff to modeling. |
 | [docs/testing-e2e-flow.md](docs/testing-e2e-flow.md) | Steps from a clean clone to batch predictions served by the champion models. |
+| [docs/load_testing_locust.md](docs/load_testing_locust.md) | Architecture, prerequisites, execution commands, and artifacts for Locust load testing. |
 
 ---
 
@@ -251,7 +253,7 @@ predictions = model.predict(model.input_example)
 
 ---
 
-## Model serving
+## Model serving and container orchestration
 
 The P1 champion is served as a REST API built with FastAPI and packaged in an OCI image that runs with Docker or Podman. The image holds the model, so the container needs no MLflow server, dataset, or network access to answer.
 
@@ -298,7 +300,24 @@ The `Containerfile` installs the dependencies from `uv.lock` with `uv sync --fro
 > [!IMPORTANT]
 > On Linux, Docker needs your user in the `docker` group: `sudo usermod -aG docker $USER`, then open a new session. Podman runs rootless and needs no group.
 
-### 3. Run the container
+### 3. Container orchestration (Docker Compose)
+
+To launch the full multi-service stack (`mibici-api` on port `8000` and `mibici-mlflow` on port `5000`) with a single command:
+
+```bash
+docker compose up -d --build
+```
+
+Check service health and stop the stack when finished:
+
+```bash
+docker compose ps
+docker compose down
+```
+
+### 4. Run a standalone container
+
+To run only the inference API container without Compose:
 
 ```bash
 make serve                      # docker run --rm --name mibici-api -p 8000:8000 mibici-api:latest
@@ -320,7 +339,7 @@ docker run --rm -p 8000:8000 \
 
 Podman resolves `host.containers.internal` without `--add-host`.
 
-### 4. Call the API
+### 5. Call the API
 
 | Endpoint | What it returns |
 | --- | --- |
@@ -382,6 +401,50 @@ The output is validated as well: a prediction that is negative, infinite, or mis
 The API answering from the container built with Docker:
 
 ![docker ps shows the container healthy, and curl calls to /model and /predict return the served version and its predictions](docs/evidence/api-container.png)
+
+---
+
+## Load testing and CI/CD
+
+### Load testing with Locust
+
+Concurrent traffic against the containerized API is simulated using **Locust** (`locustfile.py`). With the Docker Compose stack running (`docker compose up -d`), launch a headless load test against `P1DemandAPIUser`:
+
+```bash
+locust -f locustfile.py P1DemandAPIUser \
+  --headless \
+  --host http://localhost:8000 \
+  --users 50 \
+  --spawn-rate 10 \
+  --run-time 30s \
+  --csv=reports/locust_p1 \
+  --html=reports/locust_p1_report.html
+```
+
+Monitor container CPU and memory saturation in a separate terminal during the run:
+
+```bash
+docker stats
+```
+
+Generated `.csv` and `.html` artifacts in `reports/` are gitignored. For architectural details on Locust's single-threaded cooperative runner (`gevent` greenlets) and Web UI options, see [docs/load_testing_locust.md](docs/load_testing_locust.md).
+
+### Evidence
+
+Results from a 30-second headless load test with 50 concurrent users (`P1DemandAPIUser`, final task ratio: 60% single `/predict`, 20% batch `/predict`, and 20% `/health`), sustaining ~22.6 RPS with 0% failures:
+
+![Locust request and response time percentile statistics under 50 concurrent users](docs/evidence/load-testing/locust-report-1.png)
+
+![Locust throughput (RPS), latency percentiles, and concurrent user ramp-up charts](docs/evidence/load-testing/locust-report-2.png)
+
+![Locust final task ratio breakdown across P1DemandAPIUser endpoints](docs/evidence/load-testing/locust-report-3.png)
+
+### CI/CD pipeline (GitHub Actions)
+
+Every `push` or `pull_request` targeting `main` triggers the GitHub Actions workflow under `.github/workflows/`:
+
+1. **Automated quality & test suite:** Installs locked dependencies via `uv sync` and executes Ruff linting and the `pytest` suite (`tests/`).
+2. **Container image build:** Validates that the inference API image builds cleanly from `Containerfile` with the exported model artifacts and build context rules.
 
 ---
 
@@ -702,9 +765,13 @@ make check
 ## Project organization
 
 ```text
+├── .github
+│   └── workflows           <- CI/CD pipelines for automated testing and container builds
 ├── Makefile                <- MLflow Project targets, ingestion, features, serving, clean, lint, and test
 ├── Containerfile           <- image of the API with the exported P1 model
+├── docker-compose.yml      <- orchestrates the inference API and MLflow tracking server
 ├── .dockerignore           <- limits the build context to the API, the lockfile, and the model
+├── locustfile.py           <- Locust load testing user scenarios for the inference API
 ├── MLproject               <- MLflow Project: environment and the ingest, train, register, drift, retrain, and ab_test entry points
 ├── python_env.yaml         <- environment of the MLflow Project, pinned to uv.lock
 ├── README.md
@@ -718,9 +785,10 @@ make check
 │   ├── interim
 │   └── external
 ├── docs
-│   ├── data-pipeline.md    <- data source, ingestion, storage, versioning, and gold processing
-│   ├── testing-e2e-flow.md <- clean clone to champion predictions, step by step
-│   ├── evidence            <- screenshots of the quality, security, and API checks, and the monitoring evidence
+│   ├── data-pipeline.md         <- data source, ingestion, storage, versioning, and gold processing
+│   ├── testing-e2e-flow.md      <- clean clone to champion predictions, step by step
+│   ├── load_testing_locust.md   <- architecture, prerequisites, and commands for Locust load testing
+│   ├── evidence                 <- screenshots of quality, security, API, monitoring, and load testing checks
 │   └── Machine Learning Canvas.pdf
 ├── models                  <- models exported from the registry, gitignored
 ├── reports

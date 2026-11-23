@@ -1,6 +1,9 @@
 # Ignore data folder contents except .gitkeep
 data/**
 !data/**/.gitkeep
+reports/**
+!reports/**/
+!reports/**/.gitkeep
 
 # Mac OS-specific storage files
 .DS_Store
